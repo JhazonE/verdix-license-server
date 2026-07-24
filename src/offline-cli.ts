@@ -18,7 +18,6 @@ import {
   signLicense,
   normalizeMachineId,
   LicensePayload,
-  PRODUCT_ID,
   LICENSE_FORMAT_VERSION,
   HOSTED_MACHINE_ID,
 } from './licensing/core';
@@ -67,10 +66,15 @@ async function main() {
       expires = new Date(Date.now() + days * 86400000).toISOString();
     }
 
+    const productId = (args.product || 'verdix-pos').trim().toLowerCase();
+    const { getProduct } = await import('./products');
+    const product = await getProduct(productId);
+    if (!product) fail(`Unknown product "${productId}". Register it in the dashboard first.`);
+
     const payload: LicensePayload = {
       v: LICENSE_FORMAT_VERSION,
       lid: crypto.randomUUID(),
-      product: PRODUCT_ID,
+      product: productId,
       customer,
       edition: (args.edition || 'standard').trim(),
       machineId: normalizeMachineId(machineRaw),
@@ -78,7 +82,7 @@ async function main() {
       expires,
       features: (args.features || '').split(',').map((f) => f.trim()).filter(Boolean),
     };
-    const key = signLicense(payload, getPrivateKeyPem());
+    const key = signLicense(payload, getPrivateKeyPem(product!), product!.license_prefix);
     printKey(payload, key);
     return;
   }

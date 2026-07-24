@@ -17,7 +17,18 @@ import fs from 'fs';
 import path from 'path';
 import { generateKeyPair } from './licensing/core';
 
-const keysDir = path.join(__dirname, '..', 'keys');
+function argOf(flag: string): string | undefined {
+  const i = process.argv.indexOf(flag);
+  return i >= 0 ? process.argv[i + 1] : undefined;
+}
+
+const productId = (argOf('--product') || 'verdix-pos').trim().toLowerCase();
+
+// verdix-pos predates per-product key directories and keeps the flat layout.
+const keysDir =
+  productId === 'verdix-pos'
+    ? path.join(__dirname, '..', 'keys')
+    : path.join(__dirname, '..', 'keys', productId);
 const privatePath = path.join(keysDir, 'private-key.pem');
 const publicPath = path.join(keysDir, 'public-key.pem');
 // Local public-key.ts in this repo. NOTE: after separating from the POS
@@ -26,8 +37,9 @@ const publicPath = path.join(keysDir, 'public-key.pem');
 // the POS repo by hand, or the POS will fail to verify newly issued licenses.
 const posPublicKeyTs = path.join(__dirname, 'licensing', 'public-key.ts');
 
-function main() {
-  if (fs.existsSync(privatePath) && process.argv[2] !== '--force') {
+async function main() {
+  const force = process.argv.includes('--force');
+  if (fs.existsSync(privatePath) && !force) {
     console.error(
       '\n❌ A private key already exists at:\n   ' +
         privatePath +
@@ -62,6 +74,22 @@ export const PUBLIC_KEY_PEM = \`${publicKey.trim()}\`;
   console.log('   Public key  : ' + publicPath);
   console.log('   Embedded in : ' + posPublicKeyTs);
   console.log('\n   For Railway: set LICENSE_PRIVATE_KEY to the contents of private-key.pem\n');
+
+  // Record the public key so the dashboard can show developers what to embed.
+  try {
+    const { getProduct, setProductPublicKey } = await import('./products');
+    if (await getProduct(productId)) {
+      await setProductPublicKey(productId, publicKey);
+      console.log(`   ✓ public key stored on product "${productId}"`);
+    } else {
+      console.log(`   · product "${productId}" not registered yet — add it in the dashboard`);
+    }
+  } catch (e) {
+    console.log('   · could not reach the DB to store the public key:', (e as Error).message);
+  }
 }
 
-main();
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
