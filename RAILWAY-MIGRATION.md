@@ -54,6 +54,9 @@ Paste in everything captured in Step 0.
 - [ ] `LICENSE_ADMIN_SECRET`
 - [ ] `LICENSE_DB_HOST` / `LICENSE_DB_PORT` / `LICENSE_DB_USER` / `LICENSE_DB_PASSWORD` / `LICENSE_DB_NAME` / `LICENSE_DB_SSL`
 - [ ] `CLOUD_PROVISION_*` and `CLOUD_CONFIG_SECRET` — only if used
+- [ ] **Per-product signing keys** — one variable per product, named by that product's
+      `env_key_name` (e.g. `LICENSE_PRIVATE_KEY_MYAPP`). `verdix-pos` uses
+      `LICENSE_PRIVATE_KEY`, so the original variable is unchanged.
 
 **Do NOT set `PORT`.** Railway injects it, and `server.ts:41` reads `PORT || LICENSE_UI_PORT || 4100`. Setting it by hand can bind the wrong port and fail health checks. `LICENSE_UI_PORT` is a local-dev override only — leave it unset in Railway.
 

@@ -102,6 +102,45 @@ If `LICENSE_DB_*` is unset it uses `CLOUD_DB_*` (Railway), then `DB_*` (local).
    `LICENSE_PRIVATE_KEY` (paste the contents of `keys/private-key.pem`).
 3. `npm run license:migrate` + `npm run license:seed-admin` once against it.
 
+## Licensing a new product
+
+1. **Register the product** — dashboard → Products → Add, or SQL:
+
+   ```sql
+   INSERT INTO products (id, name, key_prefix, license_prefix, env_key_name, status)
+   VALUES ('my-app', 'My App', 'MYAP', 'MYAP1', 'LICENSE_PRIVATE_KEY_MYAPP', 'active');
+   ```
+
+   - `key_prefix` — product keys look like `MYAP-XXXX-XXXX-XXXX`
+   - `license_prefix` — tokens look like `MYAP1.<payload>.<signature>`
+   - `env_key_name` — the env var holding this product's PRIVATE key in production.
+     This is not a fixed convention — it's whatever you put in this column. `keygen`
+     (step 2) reads it back off the product row and prints the exact name to set.
+
+2. **Generate its keypair** — every product needs its own; never reuse another
+   product's key (a leak of one would compromise both):
+
+   ```bash
+   npm run keygen -- --product my-app
+   ```
+
+   Writes `keys/my-app/private-key.pem` and `keys/my-app/public-key.pem`, and
+   stores the public key on the product row. At the end it prints the env var
+   name to use in step 4 — read it from the output rather than assuming.
+
+3. **Embed the public key in your app.** `keygen` only auto-embeds the public
+   key for `verdix-pos` (into `lib/licensing/public-key.ts` in that repo). For
+   any other product, copy `keys/my-app/public-key.pem` (or the copy on the
+   dashboard) into your own app yourself. Your app verifies with that key, its
+   own product id, and its own `license_prefix`.
+
+4. **Deploy the private key** — set the env var named in your product's
+   `env_key_name` column (e.g. `LICENSE_PRIVATE_KEY_MYAPP`) in Railway to the
+   contents of `keys/my-app/private-key.pem`. Never commit it.
+
+Each product is cryptographically isolated: a license signed for one product
+fails verification against any other product's key.
+
 ## Security
 
 - **Asymmetric (Ed25519)** — the POS verifies but never signs; no shared secret
