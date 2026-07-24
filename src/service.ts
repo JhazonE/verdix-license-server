@@ -507,6 +507,7 @@ export async function log(
 
 // ── System configuration (backup / restore / reset) ──────────────────────────
 export async function exportBackup(): Promise<object> {
+  const products = await query<any[]>(`SELECT * FROM products ORDER BY created_at ASC`);
   const customers = await query<any[]>(`SELECT * FROM customers ORDER BY created_at ASC`);
   const licenses = await query<any[]>(`SELECT * FROM licenses ORDER BY created_at ASC`);
   const activations = await query<any[]>(`SELECT * FROM activations ORDER BY activated_at ASC`);
@@ -514,7 +515,7 @@ export async function exportBackup(): Promise<object> {
   return {
     version: 1,
     exported_at: new Date().toISOString(),
-    tables: { customers, licenses, activations, activation_logs: logs },
+    tables: { products, customers, licenses, activations, activation_logs: logs },
   };
 }
 
@@ -535,6 +536,7 @@ export async function importBackup(
 ): Promise<{ customers: number; licenses: number; activations: number }> {
   if (!data?.tables) throw new Error('Invalid backup format — missing "tables" key.');
   const {
+    products = [],
     customers = [],
     licenses = [],
     activations = [],
@@ -547,6 +549,24 @@ export async function importBackup(
     await query(`TRUNCATE TABLE activations`);
     await query(`TRUNCATE TABLE licenses`);
     await query(`TRUNCATE TABLE customers`);
+
+    // Products are NOT truncated — restore upserts on top of whatever the
+    // migration already seeded (verdix-pos), so a restored row for the same
+    // id wins over the seeded default, and products created after this
+    // backup was taken (with no matching row in the backup) are preserved
+    // rather than deleted. Licenses below reference product_id, so this must
+    // run first.
+    for (const pr of products) {
+      await query(
+        `INSERT INTO products (id, name, key_prefix, license_prefix, public_key, env_key_name, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           name = VALUES(name), key_prefix = VALUES(key_prefix), license_prefix = VALUES(license_prefix),
+           public_key = VALUES(public_key), env_key_name = VALUES(env_key_name), status = VALUES(status)`,
+        [pr.id, pr.name, pr.key_prefix, pr.license_prefix, pr.public_key ?? null,
+         pr.env_key_name, pr.status, pr.created_at]
+      );
+    }
 
     for (const c of customers) {
       await query(

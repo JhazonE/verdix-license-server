@@ -46,6 +46,20 @@ export async function createProduct(input: {
     throw new Error('env_key_name is required.');
   }
 
+  const clashes = await query<any[]>(
+    `SELECT id, key_prefix, license_prefix FROM products
+      WHERE key_prefix = ? OR license_prefix = ?`,
+    [key_prefix, license_prefix]
+  );
+  const clash = clashes.find((p) => p.key_prefix === key_prefix || p.license_prefix === license_prefix);
+  if (clash) {
+    throw new Error(
+      `Prefix already in use by product "${clash.id}" ` +
+        `(key_prefix=${clash.key_prefix}, license_prefix=${clash.license_prefix}). ` +
+        `Choose different key_prefix/license_prefix values.`
+    );
+  }
+
   await query(
     `INSERT INTO products (id, name, key_prefix, license_prefix, env_key_name, status)
      VALUES (?, ?, ?, ?, ?, 'active')`,

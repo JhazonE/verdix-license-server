@@ -380,11 +380,11 @@
         <label>Product ID *</label><input id="p-id" placeholder="e.g. verdix-inventory" autocomplete="off" />
         <label>Name *</label><input id="p-name" placeholder="e.g. Verdix Inventory" />
         <div class="row">
-          <div><label>Key Prefix *</label><input id="p-key-prefix" placeholder="VRDX" autocomplete="off" /></div>
-          <div><label>License Prefix *</label><input id="p-license-prefix" placeholder="VRDX1" autocomplete="off" /></div>
+          <div><label>Key Prefix *</label><input id="p-key-prefix" placeholder="MYAP" autocomplete="off" /></div>
+          <div><label>License Prefix *</label><input id="p-license-prefix" placeholder="MYAP1" autocomplete="off" /></div>
         </div>
         <label>Env Key Name *</label><input id="p-env-key" placeholder="LICENSE_PRIVATE_KEY_VERDIX_INVENTORY" autocomplete="off" />
-        <p class="muted" style="margin:10px 0 0;font-size:12px">The product key shown to customers starts with the <strong>key prefix</strong> (e.g. <code class="key">VRDX-7QK4-…</code>). The signed license token starts with the <strong>license prefix</strong>. The <strong>env key name</strong> is the environment variable holding this product's Ed25519 private key.</p>
+        <p class="muted" style="margin:10px 0 0;font-size:12px">The product key shown to customers starts with the <strong>key prefix</strong> (e.g. <code class="key">MYAP-7QK4-…</code>). The signed license token starts with the <strong>license prefix</strong>. The <strong>env key name</strong> is the environment variable holding this product's Ed25519 private key. Prefixes must be unique across products — <code class="key">VRDX</code>/<code class="key">VRDX1</code> are already used by verdix-pos.</p>
         <div class="err" id="p-err"></div>
       </div>
       <div class="drawer-foot">

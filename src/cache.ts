@@ -15,6 +15,7 @@ const REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes
 export interface CachedLicense {
   id: string;
   customer_id: string;
+  product_id: string;
   product_key: string;
   edition: string;
   type: string;

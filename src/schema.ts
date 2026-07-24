@@ -34,7 +34,9 @@ const TABLES: { name: string; sql: string }[] = [
         public_key     TEXT NULL,
         env_key_name   VARCHAR(64) NOT NULL,
         status         ENUM('active','inactive') NOT NULL DEFAULT 'active',
-        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_key_prefix (key_prefix),
+        UNIQUE KEY uniq_license_prefix (license_prefix)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `,
   },
@@ -158,6 +160,41 @@ async function applyColumns(): Promise<void> {
 }
 
 /**
+ * Additive unique-index migrations. Each runs only when the named index is
+ * absent, so this stays idempotent like CREATE TABLE / applyColumns above.
+ * Needed because `products` already exists in live databases — CREATE TABLE
+ * IF NOT EXISTS will never retrofit a UNIQUE constraint onto it.
+ */
+const INDEXES: { table: string; index: string; sql: string }[] = [
+  {
+    table: 'products',
+    index: 'uniq_key_prefix',
+    sql: `ALTER TABLE products ADD UNIQUE KEY uniq_key_prefix (key_prefix)`,
+  },
+  {
+    table: 'products',
+    index: 'uniq_license_prefix',
+    sql: `ALTER TABLE products ADD UNIQUE KEY uniq_license_prefix (license_prefix)`,
+  },
+];
+
+async function applyIndexes(): Promise<void> {
+  for (const idx of INDEXES) {
+    const rows = await query<any[]>(
+      `SELECT INDEX_NAME FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?`,
+      [idx.table, idx.index]
+    );
+    if (rows.length > 0) {
+      console.log(`  · index exists: ${idx.table}.${idx.index}`);
+      continue;
+    }
+    await query(idx.sql);
+    console.log(`  ✓ index added: ${idx.table}.${idx.index}`);
+  }
+}
+
+/**
  * The verdix-pos row must exist before any license references it. Its values
  * reproduce the pre-multi-product hardcoded constants exactly, which is what
  * makes already-issued licenses keep working.
@@ -198,6 +235,7 @@ export async function migrate(): Promise<void> {
     console.log('  ✓ table ready: ' + t.name);
   }
   await applyColumns();
+  await applyIndexes();
   await seedDefaultProduct();
 }
 
