@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vendix LMS — Sign in</title>
+  <style>
+    :root { --bg:#0a0c11; --panel:#141821; --panel2:#0f131b; --border:#222836; --border2:#2c3343; --muted:#7c869c; --text:#e9ecf3; --accent:#6366f1; --accent2:#8b5cf6; --bad:#ef4444; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; font-family:'Segoe UI',system-ui,sans-serif; color:var(--text);
+      background:
+        radial-gradient(900px 500px at 50% -20%, rgba(99,102,241,.18) 0%, transparent 60%),
+        radial-gradient(700px 500px at 80% 120%, rgba(139,92,246,.14) 0%, transparent 55%),
+        var(--bg);
+      display:flex; align-items:center; justify-content:center; padding:16px; }
+    .card { width:100%; max-width:400px; background:linear-gradient(180deg,var(--panel),var(--panel2));
+      border:1px solid var(--border2); border-radius:20px; padding:36px; box-shadow:0 30px 80px -30px rgba(0,0,0,.8); }
+    .brand { display:flex; flex-direction:column; align-items:center; gap:14px; margin-bottom:26px; text-align:center; }
+    .logo { width:56px; height:56px; border-radius:16px; display:grid; place-items:center; font-weight:800; font-size:26px; color:#fff;
+      background:linear-gradient(135deg,var(--accent),var(--accent2)); box-shadow:0 12px 30px -8px var(--accent); }
+    h1 { font-size:20px; margin:0; }
+    p.sub { margin:4px 0 0; font-size:12.5px; color:var(--muted); text-transform:uppercase; letter-spacing:1.5px; }
+    label { display:block; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin:18px 0 7px; }
+    input { width:100%; padding:12px 14px; background:var(--panel2); border:1px solid var(--border2); border-radius:11px; color:var(--text); font-size:14px; outline:none; transition:.15s; }
+    input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(99,102,241,.15); }
+    button { margin-top:26px; width:100%; padding:13px; border:none; border-radius:12px; cursor:pointer; font-size:15px; font-weight:700; color:#fff;
+      background:linear-gradient(135deg,var(--accent),var(--accent2)); box-shadow:0 10px 24px -10px var(--accent); transition:.15s; }
+    button:hover:not(:disabled) { filter:brightness(1.08); transform:translateY(-1px); }
+    button:disabled { opacity:.55; }
+    .err { display:none; margin-top:16px; padding:11px 13px; border-radius:11px; font-size:13px; color:#fca5a5; background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.4); }
+    .err.show { display:block; }
+  </style>
+</head>
+<body>
+  <form class="card" onsubmit="return doLogin(event)">
+    <div class="brand">
+      <div class="logo">V</div>
+      <div><h1>Vendix LMS</h1><p class="sub">License Management</p></div>
+    </div>
+    <label>Username</label>
+    <input id="username" autocomplete="username" autofocus />
+    <label>Password</label>
+    <input id="password" type="password" autocomplete="current-password" />
+    <button id="btn" type="submit">Sign in</button>
+    <div id="err" class="err"></div>
+  </form>
+  <script>
+    async function doLogin(e) {
+      e.preventDefault();
+      const btn = document.getElementById('btn');
+      const err = document.getElementById('err');
+      err.classList.remove('show');
+      btn.disabled = true; btn.textContent = 'Signing in…';
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: username.value, password: password.value })
+        });
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error || 'Login failed');
+        location.href = '/';
+      } catch (ex) {
+        err.textContent = ex.message; err.classList.add('show');
+        btn.disabled = false; btn.textContent = 'Sign in';
+      }
+      return false;
+    }
+  </script>
+</body>
+</html>

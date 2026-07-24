@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vendix LMS — Dashboard</title>
+  <style>
+    :root {
+      --bg:#0a0c11; --sidebar:#0e1117; --panel:#141821; --panel2:#0f131b; --elevated:#1a1f2b;
+      --border:#222836; --border2:#2c3343; --muted:#7c869c; --muted2:#9aa3b8; --text:#e9ecf3;
+      --accent:#6366f1; --accent2:#8b5cf6; --good:#22c55e; --warn:#f59e0b; --bad:#ef4444; --cyan:#06b6d4;
+      --shadow:0 10px 40px -12px rgba(0,0,0,.7);
+    }
+    * { box-sizing:border-box; }
+    html,body { height:100%; }
+    body { margin:0; font-family:'Segoe UI',system-ui,-apple-system,sans-serif; color:var(--text);
+      background:var(--bg); display:flex; overflow:hidden; }
+    ::-webkit-scrollbar { width:9px; height:9px; }
+    ::-webkit-scrollbar-thumb { background:var(--border2); border-radius:10px; }
+    ::-webkit-scrollbar-track { background:transparent; }
+
+    /* ── Sidebar ── */
+    .sidebar { width:248px; flex-shrink:0; background:var(--sidebar); border-right:1px solid var(--border);
+      display:flex; flex-direction:column; padding:18px 14px; }
+    .brand { display:flex; align-items:center; gap:12px; padding:6px 8px 20px; }
+    .brand .logo { width:42px; height:42px; border-radius:12px; display:grid; place-items:center; font-weight:800; font-size:20px; color:#fff;
+      background:linear-gradient(135deg,var(--accent),var(--accent2)); box-shadow:0 6px 18px -6px var(--accent); }
+    .brand h1 { font-size:15px; margin:0; font-weight:700; letter-spacing:.2px; }
+    .brand p { font-size:11px; margin:2px 0 0; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }
+    .nav { display:flex; flex-direction:column; gap:3px; margin-top:6px; }
+    .nav .label { font-size:10px; text-transform:uppercase; letter-spacing:1.4px; color:var(--muted); padding:14px 12px 6px; }
+    .nav button { display:flex; align-items:center; gap:12px; width:100%; background:none; border:none; color:var(--muted2);
+      padding:11px 12px; border-radius:11px; cursor:pointer; font-size:14px; font-weight:500; text-align:left; transition:.15s; }
+    .nav button svg { width:18px; height:18px; stroke-width:2; opacity:.85; }
+    .nav button:hover { background:var(--panel); color:var(--text); }
+    .nav button.active { background:linear-gradient(135deg,rgba(99,102,241,.22),rgba(139,92,246,.14)); color:#fff;
+      box-shadow:inset 0 0 0 1px rgba(99,102,241,.35); }
+    .nav button.active svg { opacity:1; }
+    .nav .badge { margin-left:auto; font-size:11px; background:var(--elevated); color:var(--muted2); padding:1px 8px; border-radius:999px; }
+    .side-foot { margin-top:auto; border-top:1px solid var(--border); padding-top:14px; }
+    .user { display:flex; align-items:center; gap:11px; padding:8px 10px; border-radius:11px; }
+    .user .av { width:36px; height:36px; border-radius:10px; display:grid; place-items:center; font-weight:700; color:#fff;
+      background:linear-gradient(135deg,#475569,#334155); }
+    .user .meta { line-height:1.2; overflow:hidden; }
+    .user .meta b { font-size:13px; display:block; }
+    .user .meta span { font-size:11px; color:var(--muted); }
+    .user .out { margin-left:auto; background:none; border:none; color:var(--muted); cursor:pointer; padding:6px; border-radius:8px; }
+    .user .out:hover { background:var(--panel); color:var(--bad); }
+
+    /* ── Main ── */
+    .main { flex:1; display:flex; flex-direction:column; min-width:0; }
+    .topbar { height:64px; flex-shrink:0; border-bottom:1px solid var(--border); display:flex; align-items:center; padding:0 28px;
+      background:linear-gradient(180deg,rgba(20,24,33,.6),transparent); backdrop-filter:blur(8px); }
+    .topbar h2 { font-size:18px; margin:0; font-weight:700; }
+    .topbar .sub { font-size:12px; color:var(--muted); margin-top:1px; }
+    .content { flex:1; overflow:auto; padding:24px 28px 60px; }
+
+    /* ── Page / tab transitions ── */
+    @keyframes pageIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
+    @keyframes riseIn { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+    @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+    .content > section:not(.hidden) { animation:pageIn .34s cubic-bezier(.22,.61,.36,1) both; }
+    /* staggered stat cards */
+    .stat { animation:riseIn .5s cubic-bezier(.22,.61,.36,1) both; }
+    .stat:nth-child(1){ animation-delay:.03s; } .stat:nth-child(2){ animation-delay:.09s; }
+    .stat:nth-child(3){ animation-delay:.15s; } .stat:nth-child(4){ animation-delay:.21s; }
+    /* table fades in under the toolbar */
+    .content > section:not(.hidden) .card { animation:fadeIn .45s ease .08s both; }
+    @media (prefers-reduced-motion: reduce) { .content > section, .stat, .card { animation:none !important; } }
+
+    /* ── Skeleton loaders ── */
+    @keyframes shimmer { 100% { transform:translateX(100%); } }
+    .skel { position:relative; overflow:hidden; display:block; background:var(--panel2); border-radius:8px; }
+    .skel::after { content:''; position:absolute; inset:0; transform:translateX(-100%);
+      background:linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent); animation:shimmer 1.3s infinite; }
+    .skel-row td { border-bottom:1px solid var(--border); }
+    .skel-row .skel { height:12px; }
+
+    .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:22px; }
+    .stat { position:relative; background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:20px; overflow:hidden; }
+    .stat::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:var(--g); }
+    .stat .ico { width:38px; height:38px; border-radius:11px; display:grid; place-items:center; margin-bottom:14px; background:var(--gb); }
+    .stat .ico svg { width:19px; height:19px; color:var(--gc); }
+    .stat .n { font-size:30px; font-weight:800; letter-spacing:-.5px; }
+    .stat .l { font-size:12px; color:var(--muted); margin-top:3px; }
+
+    .bar { display:flex; align-items:center; gap:12px; margin:6px 0 16px; }
+    .bar h3 { font-size:15px; margin:0; font-weight:700; }
+    .bar .spacer { flex:1; }
+    .count { font-size:12px; color:var(--muted); }
+    .search { background:var(--panel2); border:1px solid var(--border); border-radius:10px; color:var(--text); padding:9px 12px 9px 34px; font-size:13px; width:260px; outline:none;
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%237c869c' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:11px center; transition:.15s; }
+    .search:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(99,102,241,.15); }
+
+    .card { background:var(--panel); border:1px solid var(--border); border-radius:16px; overflow:hidden; }
+    table { width:100%; border-collapse:collapse; }
+    th,td { text-align:left; padding:13px 18px; font-size:13px; border-bottom:1px solid var(--border); }
+    th { color:var(--muted); text-transform:uppercase; font-size:10.5px; letter-spacing:.6px; background:var(--panel2); }
+    tbody tr { transition:.12s; }
+    tbody tr:hover { background:var(--panel2); }
+    tr:last-child td { border-bottom:none; }
+    .pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700; }
+    .pill.active { background:rgba(34,197,94,.14); color:#86efac; }
+    .pill.suspended { background:rgba(245,158,11,.14); color:#fcd34d; }
+    .pill.revoked { background:rgba(239,68,68,.14); color:#fca5a5; }
+    .pill.perpetual { background:rgba(99,102,241,.14); color:#a5b4fc; }
+    .pill.subscription { background:rgba(139,92,246,.14); color:#c4b5fd; }
+    code.key { font-family:ui-monospace,'Cascadia Code',monospace; font-size:12px; color:#c7d2fe; }
+    .empty { padding:56px; text-align:center; color:var(--muted); }
+
+    .btn { display:inline-flex; align-items:center; gap:7px; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; border:none; padding:10px 16px; border-radius:11px; cursor:pointer; font-weight:600; font-size:13px; transition:.15s; box-shadow:0 6px 16px -8px var(--accent); }
+    .btn:hover { filter:brightness(1.08); transform:translateY(-1px); }
+    .btn:disabled { opacity:.5; cursor:not-allowed; transform:none; }
+    .btn.ghost { background:var(--panel2); border:1px solid var(--border2); color:var(--text); box-shadow:none; }
+    .btn.sm { padding:6px 11px; font-size:12px; border-radius:9px; box-shadow:none; }
+    .btn.danger { background:rgba(239,68,68,.13); border:1px solid rgba(239,68,68,.35); color:#fca5a5; box-shadow:none; }
+    .btn.danger:hover { background:rgba(239,68,68,.2); }
+
+    /* ── Drawer (replaces dialogs) ── */
+    .drawer-overlay { position:fixed; inset:0; background:rgba(4,6,10,.6); backdrop-filter:blur(2px);
+      opacity:0; pointer-events:none; transition:opacity .25s; z-index:60; }
+    .drawer-overlay.show { opacity:1; pointer-events:auto; }
+    .drawer { position:absolute; top:0; right:0; height:100%; width:480px; max-width:100%;
+      background:var(--panel); border-left:1px solid var(--border2); box-shadow:var(--shadow);
+      transform:translateX(100%); transition:transform .32s cubic-bezier(.4,0,.2,1); display:flex; flex-direction:column; }
+    .drawer-overlay.show .drawer { transform:translateX(0); }
+    .drawer-head { padding:22px 26px; border-bottom:1px solid var(--border); display:flex; align-items:flex-start; gap:12px; }
+    .drawer-head .ic { width:40px; height:40px; border-radius:11px; display:grid; place-items:center; flex-shrink:0;
+      background:linear-gradient(135deg,rgba(99,102,241,.2),rgba(139,92,246,.12)); }
+    .drawer-head .ic svg { width:20px; height:20px; color:var(--accent); }
+    .drawer-head h3 { margin:0; font-size:17px; }
+    .drawer-head p { margin:3px 0 0; font-size:12px; color:var(--muted); }
+    .drawer-head .x { margin-left:auto; background:none; border:none; color:var(--muted); cursor:pointer; font-size:20px; line-height:1; padding:4px 8px; border-radius:8px; }
+    .drawer-head .x:hover { background:var(--panel2); color:var(--text); }
+    .drawer-body { padding:22px 26px; overflow:auto; flex:1; }
+    .drawer-foot { padding:16px 26px; border-top:1px solid var(--border); display:flex; gap:10px; }
+    .drawer-foot .btn { flex:1; justify-content:center; }
+
+    label { display:block; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.4px; color:var(--muted2); margin:16px 0 7px; }
+    label:first-child { margin-top:0; }
+    input,select,textarea { width:100%; padding:11px 13px; background:var(--panel2); border:1px solid var(--border2); border-radius:10px; color:var(--text); font-size:14px; outline:none; font-family:inherit; transition:.15s; }
+    input:focus,select:focus,textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(99,102,241,.15); }
+    textarea { resize:vertical; font-family:ui-monospace,monospace; font-size:12px; }
+    .row { display:flex; gap:12px; } .row > div { flex:1; }
+    .keyout { margin-top:16px; background:var(--panel2); border:1px solid var(--border2); border-radius:11px; padding:14px; }
+    .keyout code { display:block; word-break:break-all; font-family:ui-monospace,monospace; font-size:12px; line-height:1.65; color:#c7d2fe; }
+    .err { display:none; margin-top:14px; padding:10px 13px; border-radius:10px; font-size:13px; color:#fca5a5; background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.35); }
+    .err.show { display:block; }
+    .hidden { display:none !important; }
+    .muted { color:var(--muted); font-size:13px; }
+    @media (max-width:880px){ .sidebar{width:72px;} .brand h1,.brand p,.nav .label,.nav button span,.user .meta{display:none;} .stats{grid-template-columns:repeat(2,1fr);} }
+
+    /* ── Toasts ── */
+    #toast-container { position:fixed; bottom:24px; right:24px; display:flex; flex-direction:column-reverse; gap:10px; z-index:9999; pointer-events:none; }
+    @keyframes toastIn { from { opacity:0; transform:translateX(20px); } to { opacity:1; transform:none; } }
+    @keyframes toastOut { from { opacity:1; transform:none; } to { opacity:0; transform:translateX(20px); } }
+    .toast { display:flex; align-items:flex-start; gap:12px; min-width:270px; max-width:360px; padding:13px 16px; border-radius:14px; font-size:13px; line-height:1.45; backdrop-filter:blur(12px); pointer-events:auto; cursor:pointer; animation:toastIn .26s cubic-bezier(.22,.61,.36,1) both; box-shadow:0 8px 28px -8px rgba(0,0,0,.65); }
+    .toast.out { animation:toastOut .22s ease forwards; }
+    .toast-icon { flex-shrink:0; width:18px; height:18px; margin-top:1px; }
+    .toast-body strong { display:block; font-weight:700; margin-bottom:1px; }
+    .toast.success { background:rgba(22,163,74,.2); border:1px solid rgba(34,197,94,.35); color:#86efac; }
+    .toast.error   { background:rgba(185,28,28,.2);  border:1px solid rgba(239,68,68,.35);  color:#fca5a5; }
+    .toast.info    { background:rgba(79,70,229,.22);  border:1px solid rgba(99,102,241,.4);  color:#c7d2fe; }
+    .toast.warning { background:rgba(180,83,9,.2);   border:1px solid rgba(245,158,11,.35); color:#fcd34d; }
+
+    /* ── Centered dialog (for confirm) ── */
+    .dialog { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:420px; height:auto; border-radius:18px; }
+  </style>
+</head>
+<body>
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">V</div>
+      <div><h1>Vendix LMS</h1><p>License Manager</p></div>
+    </div>
+    <nav class="nav">
+      <div class="label">Menu</div>
+      <button data-tab="overview" class="active" onclick="showTab('overview')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+        <span>Overview</span>
+      </button>
+      <button data-tab="customers" onclick="showTab('customers')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Customers</span>
+      </button>
+      <button data-tab="licenses" onclick="showTab('licenses')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M15.5 7.5 19 4M21 2l-2 2M2 22l8.5-8.5"/><circle cx="7.5" cy="15.5" r="5.5"/></svg>
+        <span>Licenses</span>
+      </button>
+      <button data-tab="activations" onclick="showTab('activations')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        <span>Activations</span>
+      </button>
+      <button data-tab="users" id="nav-users" onclick="showTab('users')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Team</span>
+      </button>
+      <button data-tab="config" id="nav-config" onclick="showTab('config')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        <span>System</span>
+      </button>
+    </nav>
+    <div class="side-foot">
+      <div class="user">
+        <div class="av" id="user-av">A</div>
+        <div class="meta"><b id="who">admin</b><span>Administrator</span></div>
+        <button class="out" title="Sign out" onclick="logout()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <h2 id="page-title">Overview</h2>
+        <div class="sub" id="page-sub">License management at a glance</div>
+      </div>
+    </div>
+    <div class="content">
+      <section id="tab-overview">
+        <div class="stats" id="stats"></div>
+        <div class="card" style="padding:22px"><p class="muted" style="margin:0">Welcome to the Vendix License Management System. Create customers, issue product keys, and generate machine-bound license keys — all from one place.</p></div>
+      </section>
+
+      <section id="tab-customers" class="hidden">
+        <div class="bar">
+          <h3>Customers</h3><span class="count" id="customers-count"></span>
+          <div class="spacer"></div>
+          <input class="search" id="customers-search" placeholder="Search name, contact, email…" oninput="renderCustomers()" />
+          <button class="btn" onclick="openCustomerModal()">+ New Customer</button>
+        </div>
+        <div class="card" id="customers-table"></div>
+      </section>
+
+      <section id="tab-licenses" class="hidden">
+        <div class="bar">
+          <h3>Licenses</h3><span class="count" id="licenses-count"></span>
+          <div class="spacer"></div>
+          <input class="search" id="licenses-search" placeholder="Search key, customer, status…" oninput="renderLicenses()" />
+          <button class="btn" onclick="openLicenseModal()">+ Issue License</button>
+        </div>
+        <div class="card" id="licenses-table"></div>
+      </section>
+
+      <section id="tab-activations" class="hidden">
+        <div class="bar">
+          <h3>Activations</h3><span class="count" id="activations-count"></span>
+          <div class="spacer"></div>
+          <input class="search" id="activations-search" placeholder="Search customer, key, machine…" oninput="renderActivations()" />
+          <button class="btn ghost" onclick="loadActivations()">↻ Refresh</button>
+        </div>
+        <div class="card" id="activations-table"></div>
+      </section>
+
+      <section id="tab-users" class="hidden">
+        <div class="bar">
+          <h3>Team</h3><span class="count" id="users-count"></span>
+          <div class="spacer"></div>
+          <input class="search" id="users-search" placeholder="Search username, role…" oninput="renderUsers()" />
+          <button class="btn" onclick="openUserModal()">+ New User</button>
+        </div>
+        <div class="card" id="users-table"></div>
+      </section>
+
+      <section id="tab-config" class="hidden">
+        <div class="bar"><h3>System Configuration</h3></div>
+
+        <!-- Backup -->
+        <div class="card" style="padding:24px;margin-bottom:16px">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div style="width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:rgba(99,102,241,.15);flex-shrink:0">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a5b4fc" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </div>
+            <div>
+              <div style="font-size:14px;font-weight:700">Database Backup</div>
+              <div class="muted" style="font-size:12px;margin-top:2px">Download all customers, licenses and activations as a JSON file</div>
+            </div>
+          </div>
+          <p class="muted" style="margin:0 0 16px;font-size:13px">The backup includes every customer, license, activation, and audit log. Admin accounts are <em>not</em> included. Store it safely — you can use it to restore this server later.</p>
+          <button class="btn" id="backup-btn" onclick="downloadBackup(this)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download Backup
+          </button>
+        </div>
+
+        <!-- Restore -->
+        <div class="card" style="padding:24px;margin-bottom:16px">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div style="width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:rgba(245,158,11,.12);flex-shrink:0">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fcd34d" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </div>
+            <div>
+              <div style="font-size:14px;font-weight:700">Restore from Backup</div>
+              <div class="muted" style="font-size:12px;margin-top:2px">Upload a JSON backup file to replace all current data</div>
+            </div>
+          </div>
+          <p class="muted" style="margin:0 0 16px;font-size:13px">Upload a backup file generated by this system. <strong style="color:#fcd34d">All existing customers, licenses, and activations will be replaced.</strong> Admin accounts are not affected.</p>
+          <input type="file" id="restore-file" accept=".json" style="display:none" onchange="doRestore(event)" />
+          <button class="btn ghost" onclick="document.getElementById('restore-file').click()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Upload &amp; Restore
+          </button>
+          <div id="restore-msg" style="display:none;margin-top:14px;padding:11px 13px;border-radius:10px;font-size:13px"></div>
+        </div>
+
+        <!-- Danger Zone -->
+        <div class="card" style="padding:24px;border-color:rgba(239,68,68,.3)">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div style="width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:rgba(239,68,68,.12);flex-shrink:0">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fca5a5" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </div>
+            <div>
+              <div style="font-size:14px;font-weight:700;color:#fca5a5">Danger Zone</div>
+              <div class="muted" style="font-size:12px;margin-top:2px">Permanently erase all license data</div>
+            </div>
+          </div>
+          <p class="muted" style="margin:0 0 16px;font-size:13px">Deletes <strong style="color:#fca5a5">all customers, licenses, activations, and audit logs</strong>. This action is permanent and cannot be undone. Admin accounts are kept. Download a backup first if you might need the data.</p>
+          <button class="btn danger" onclick="resetData()">Reset All Data</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Customer drawer -->
+  <div class="drawer-overlay" id="customer-modal" onclick="if(event.target===this)closeModal('customer-modal')">
+    <div class="drawer">
+      <div class="drawer-head">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></div>
+        <div><h3>New Customer</h3><p>Store the business and contact details</p></div>
+        <button class="x" onclick="closeModal('customer-modal')">✕</button>
+      </div>
+      <div class="drawer-body">
+        <label>Business Name *</label><input id="c-business" />
+        <div class="row">
+          <div><label>Contact Name</label><input id="c-contact" /></div>
+          <div><label>Phone</label><input id="c-phone" /></div>
+        </div>
+        <label>Email</label><input id="c-email" type="email" />
+        <label>Address</label><input id="c-address" />
+        <label>Notes</label><textarea id="c-notes" rows="2"></textarea>
+        <div class="err" id="c-err"></div>
+      </div>
+      <div class="drawer-foot">
+        <button class="btn ghost" onclick="closeModal('customer-modal')">Cancel</button>
+        <button class="btn" onclick="saveCustomer()">Save Customer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- License drawer -->
+  <div class="drawer-overlay" id="license-modal" onclick="if(event.target===this)closeModal('license-modal')">
+    <div class="drawer">
+      <div class="drawer-head">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15.5 7.5 19 4M21 2l-2 2M2 22l8.5-8.5"/><circle cx="7.5" cy="15.5" r="5.5"/></svg></div>
+        <div><h3>Issue License</h3><p>Generates a Product Key for the customer</p></div>
+        <button class="x" onclick="closeModal('license-modal')">✕</button>
+      </div>
+      <div class="drawer-body">
+        <label>Customer *</label>
+        <select id="l-customer"></select>
+        <div class="row">
+          <div><label>Edition</label>
+            <select id="l-edition"><option>standard</option><option>enterprise</option><option>trial</option></select>
+          </div>
+          <div><label>Type</label>
+            <select id="l-type" onchange="toggleExpiry()"><option value="perpetual">Perpetual</option><option value="subscription">Subscription</option></select>
+          </div>
+        </div>
+        <div id="l-expiry-wrap" class="hidden">
+          <div class="row">
+            <div><label>Duration (days)</label><input id="l-days" type="number" min="1" placeholder="365" /></div>
+            <div><label>or Expiry Date</label><input id="l-expires" type="date" /></div>
+          </div>
+        </div>
+        <div class="row">
+          <div><label>No. of Computers (seats)</label><input id="l-seats" type="number" min="1" value="1" title="How many computers/terminals can activate this license" /></div>
+          <div><label>Features (comma-sep)</label><input id="l-features" placeholder="reports, multi-terminal" /></div>
+        </div>
+        <label>Notes</label><textarea id="l-notes" rows="2"></textarea>
+        <div class="err" id="l-err"></div>
+      </div>
+      <div class="drawer-foot">
+        <button class="btn ghost" onclick="closeModal('license-modal')">Cancel</button>
+        <button class="btn" onclick="saveLicense()">Issue License</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sign (generate key) drawer -->
+  <div class="drawer-overlay" id="sign-modal" onclick="if(event.target===this)closeModal('sign-modal')">
+    <div class="drawer">
+      <div class="drawer-head">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7.5" cy="15.5" r="5.5"/><path d="M11.5 11.5 21 2M18 5l2 2-3 3-2-2"/></svg></div>
+        <div><h3>Generate License Key</h3><p id="sign-context"></p></div>
+        <button class="x" onclick="closeModal('sign-modal')">✕</button>
+      </div>
+      <div class="drawer-body">
+        <label>Customer's Machine ID *</label>
+        <textarea id="s-machine" rows="2" placeholder="ABCD-1234-EF56-… (from the POS activation screen)"></textarea>
+        <label>Machine Label (optional)</label><input id="s-label" placeholder="e.g. Front Counter PC" />
+        <div class="err" id="s-err"></div>
+        <div class="keyout hidden" id="s-keyout"><code id="s-key"></code></div>
+      </div>
+      <div class="drawer-foot">
+        <button class="btn ghost" onclick="closeModal('sign-modal')">Close</button>
+        <button class="btn" id="s-gen-btn" onclick="generateKey()">Generate Key</button>
+        <button class="btn hidden" id="s-copy-btn" onclick="copyKey()">Copy Key</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- User drawer -->
+  <div class="drawer-overlay" id="user-modal" onclick="if(event.target===this)closeModal('user-modal')">
+    <div class="drawer">
+      <div class="drawer-head">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></div>
+        <div><h3 id="u-title">New User</h3><p id="u-subtitle">Create a dashboard login</p></div>
+        <button class="x" onclick="closeModal('user-modal')">✕</button>
+      </div>
+      <div class="drawer-body">
+        <label>Username *</label><input id="u-username" autocomplete="off" />
+        <label>Password <span id="u-pass-hint" style="text-transform:none;color:var(--muted)">* (min 6 characters)</span></label>
+        <input id="u-password" type="password" autocomplete="new-password" />
+        <label>Role</label>
+        <select id="u-role">
+          <option value="admin">Admin — full access incl. user management</option>
+          <option value="manager">Manager — manage licenses</option>
+          <option value="staff">Staff — manage licenses</option>
+        </select>
+        <div class="err" id="u-err"></div>
+      </div>
+      <div class="drawer-foot">
+        <button class="btn ghost" onclick="closeModal('user-modal')">Cancel</button>
+        <button class="btn" id="u-save-btn" onclick="saveUser()">Create User</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toast-container"></div>
+
+  <!-- Generic confirm dialog -->
+  <div class="drawer-overlay" id="confirm-modal">
+    <div class="drawer dialog">
+      <div class="drawer-head">
+        <div class="ic" id="confirm-ic"></div>
+        <div><h3 id="confirm-title">Confirm</h3><p id="confirm-sub"></p></div>
+        <button class="x" onclick="closeModal('confirm-modal')">✕</button>
+      </div>
+      <div class="drawer-body">
+        <p id="confirm-msg" style="margin:0;font-size:14px;line-height:1.65;color:var(--muted2)"></p>
+      </div>
+      <div class="drawer-foot">
+        <button class="btn ghost" onclick="closeModal('confirm-modal')">Cancel</button>
+        <button class="btn danger" id="confirm-ok" onclick="confirmOk()">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Password reset drawer -->
+  <div class="drawer-overlay" id="pw-modal" onclick="if(event.target===this)closeModal('pw-modal')">
+    <div class="drawer" style="width:400px">
+      <div class="drawer-head">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+        <div><h3>Reset Password</h3><p id="pw-for"></p></div>
+        <button class="x" onclick="closeModal('pw-modal')">✕</button>
+      </div>
+      <div class="drawer-body">
+        <label>New Password <span style="text-transform:none;font-weight:400;color:var(--muted)">* min 6 characters</span></label>
+        <input id="pw-input" type="password" placeholder="New password" autocomplete="new-password" onkeydown="if(event.key==='Enter')savePw()" />
+        <div class="err" id="pw-err"></div>
+      </div>
+      <div class="drawer-foot">
+        <button class="btn ghost" onclick="closeModal('pw-modal')">Cancel</button>
+        <button class="btn" onclick="savePw()">Update Password</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- License issued success drawer -->
+  <div class="drawer-overlay" id="license-issued-modal" onclick="if(event.target===this)closeModal('license-issued-modal')">
+    <div class="drawer">
+      <div class="drawer-head">
+        <div class="ic" style="background:rgba(34,197,94,.15)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#86efac" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div><h3 style="color:#86efac">License Issued</h3><p>Product key ready to send to the customer</p></div>
+        <button class="x" onclick="closeModal('license-issued-modal')">✕</button>
+      </div>
+      <div class="drawer-body">
+        <p class="muted" style="margin:0 0 18px;font-size:13px">Give this product key to the customer for online activation, or click <strong>Generate Key</strong> to make an offline machine-bound key.</p>
+        <label>Product Key</label>
+        <div class="keyout"><code id="issued-product-key" style="font-size:15px;letter-spacing:.5px;word-break:break-all"></code></div>
+      </div>
+      <div class="drawer-foot">
+        <button class="btn ghost" onclick="closeModal('license-issued-modal')">Close</button>
+        <button class="btn" id="issued-copy-btn" onclick="copyIssuedKey()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          Copy Key
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reset confirmation modal -->
+  <div class="drawer-overlay" id="reset-modal" onclick="if(event.target===this)closeModal('reset-modal')">
+    <div class="drawer" style="width:420px">
+      <div class="drawer-head">
+        <div class="ic" style="background:rgba(239,68,68,.15)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fca5a5" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <div><h3 style="color:#fca5a5">Reset All Data</h3><p>This action is permanent and cannot be undone</p></div>
+        <button class="x" onclick="closeModal('reset-modal')">✕</button>
+      </div>
+      <div class="drawer-body">
+        <p class="muted" style="margin:0 0 16px;font-size:13px">This will permanently delete <strong style="color:#fca5a5">all customers, licenses, activations, and audit logs</strong>. Admin accounts are kept.</p>
+        <label>Type <strong style="color:#fca5a5;font-family:monospace">DELETE</strong> to confirm</label>
+        <input id="reset-confirm-input" placeholder="DELETE" autocomplete="off" oninput="document.getElementById('reset-confirm-btn').disabled=this.value!=='DELETE'" />
+        <div class="err" id="reset-err"></div>
+      </div>
+      <div class="drawer-foot">
+        <button class="btn ghost" onclick="closeModal('reset-modal')">Cancel</button>
+        <button class="btn danger" id="reset-confirm-btn" disabled onclick="confirmReset()">Reset All Data</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

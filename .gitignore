@@ -1,0 +1,6 @@
+# Signing keys are secret. NEVER commit them.
+keys/
+node_modules/
+.env
+dist/
+*.log

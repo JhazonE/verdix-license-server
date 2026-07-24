@@ -1,0 +1,27 @@
+{
+  "name": "verdix-license-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone Ed25519 license management server for Verdix POS",
+  "scripts": {
+    "keygen": "tsx src/keygen.ts",
+    "new": "tsx src/offline-cli.ts",
+    "migrate": "tsx src/schema.ts",
+    "seed-admin": "tsx src/seed-admin.ts",
+    "reset-admin": "tsx src/reset-admin.ts",
+    "server": "tsx src/server.ts",
+    "provision-cloud": "tsx src/provision-cloud.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^16.4.5",
+    "mysql2": "^3.11.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.17.17",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
