@@ -559,10 +559,10 @@ export async function importBackup(
     for (const l of licenses) {
       await query(
         `INSERT INTO licenses
-           (id, customer_id, product_key, edition, type, expires_at, max_activations,
+           (id, customer_id, product_id, product_key, edition, type, expires_at, max_activations,
             features, status, notes, created_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [l.id, l.customer_id, l.product_key, l.edition, l.type, l.expires_at ?? null,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [l.id, l.customer_id, l.product_id ?? 'verdix-pos', l.product_key, l.edition, l.type, l.expires_at ?? null,
          l.max_activations,
          typeof l.features === 'string' ? l.features : JSON.stringify(l.features ?? []),
          l.status, l.notes ?? null, l.created_by ?? null, l.created_at]
