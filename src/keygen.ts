@@ -91,16 +91,24 @@ export const PUBLIC_KEY_PEM = \`${publicKey.trim()}\`;
         ' app.'
     );
   }
-  console.log('\n   For Railway: set LICENSE_PRIVATE_KEY to the contents of private-key.pem\n');
-
-  // Record the public key so the dashboard can show developers what to embed.
+  // Record the public key so the dashboard can show developers what to embed,
+  // and name the env var THIS product actually reads — each product resolves its
+  // private key from its own env_key_name, so naming the wrong one here would
+  // send the operator to set a variable the server never reads.
   try {
     const { getProduct, setProductPublicKey } = await import('./products');
-    if (await getProduct(productId)) {
+    const product = await getProduct(productId);
+    if (product) {
       await setProductPublicKey(productId, publicKey);
       console.log(`   ✓ public key stored on product "${productId}"`);
+      console.log(
+        `\n   For Railway: set ${product.env_key_name} to the contents of private-key.pem\n`
+      );
     } else {
       console.log(`   · product "${productId}" not registered yet — add it in the dashboard`);
+      console.log(
+        '\n   For Railway: set the product\'s env_key_name to the contents of private-key.pem\n'
+      );
     }
   } catch (e) {
     console.log('   · could not reach the DB to store the public key:', (e as Error).message);

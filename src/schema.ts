@@ -2,6 +2,8 @@
  * License Server schema — creates all tables (idempotent).
  * Run standalone:  npm run license:migrate
  */
+import fs from 'fs';
+import path from 'path';
 import { ensureDatabase, query } from './db';
 
 const TABLES: { name: string; sql: string }[] = [
@@ -167,6 +169,26 @@ async function seedDefaultProduct(): Promise<void> {
      VALUES ('verdix-pos', 'Verdix POS', 'VRDX', 'VRDX1', 'LICENSE_PRIVATE_KEY', 'active')`
   );
   console.log('  ✓ product seeded: verdix-pos');
+
+  // Backfill verdix-pos's public key from the on-disk PEM when the column is
+  // still empty. The dashboard shows this column so developers can copy the key
+  // to embed in their app; verdix-pos predates the products table, so its row
+  // starts out NULL. Signing never reads this column (it goes through
+  // env_key_name), so a missing PEM file here is not fatal.
+  const rows = await query<any[]>(
+    `SELECT public_key FROM products WHERE id = 'verdix-pos'`
+  );
+  if (rows.length > 0 && !rows[0].public_key) {
+    const pemPath = path.join(__dirname, '..', 'keys', 'public-key.pem');
+    if (fs.existsSync(pemPath)) {
+      await query(`UPDATE products SET public_key = ? WHERE id = 'verdix-pos'`, [
+        fs.readFileSync(pemPath, 'utf8'),
+      ]);
+      console.log('  ✓ public key backfilled: verdix-pos');
+    } else {
+      console.log('  · no keys/public-key.pem on disk — verdix-pos public_key left empty');
+    }
+  }
 }
 
 export async function migrate(): Promise<void> {
