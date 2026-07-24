@@ -67,12 +67,30 @@ async function main() {
  */
 export const PUBLIC_KEY_PEM = \`${publicKey.trim()}\`;
 `;
-  fs.writeFileSync(posPublicKeyTs, tsContent, 'utf8');
+  // src/licensing/public-key.ts exports PUBLIC_KEY_PEM, which is documented and
+  // consumed as the Verdix POS public key specifically. Only ever overwrite it
+  // when we just generated the verdix-pos key pair — writing it for any other
+  // product would silently replace the Verdix key constant with that product's
+  // key, breaking Verdix license verification for anyone who reads/uses it.
+  const isDefaultProduct = productId === 'verdix-pos';
+  if (isDefaultProduct) {
+    fs.writeFileSync(posPublicKeyTs, tsContent, 'utf8');
+  }
 
   console.log('\n✅ License key pair generated.\n');
   console.log('   Private key : ' + privatePath + '   (KEEP SECRET — gitignored)');
   console.log('   Public key  : ' + publicPath);
-  console.log('   Embedded in : ' + posPublicKeyTs);
+  if (isDefaultProduct) {
+    console.log('   Embedded in : ' + posPublicKeyTs);
+  } else {
+    console.log(
+      '   · public-key.ts not updated (only written for verdix-pos). Embed keys/' +
+        productId +
+        '/public-key.pem in the ' +
+        productId +
+        ' app.'
+    );
+  }
   console.log('\n   For Railway: set LICENSE_PRIVATE_KEY to the contents of private-key.pem\n');
 
   // Record the public key so the dashboard can show developers what to embed.
