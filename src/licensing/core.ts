@@ -25,13 +25,19 @@ import crypto from 'crypto';
 /** Bump when the payload shape changes in a backward-incompatible way. */
 export const LICENSE_FORMAT_VERSION = 1;
 
-/** Product identifier embedded in every license. The POS rejects mismatches. */
+/**
+ * Default product id — the original single-product value. Multi-product
+ * callers pass the product's own id in LicensePayload.product instead.
+ */
 export const PRODUCT_ID = 'verdix-pos';
 
 /** Sentinel machineId marking a web/hosted license (no hardware binding). */
 export const HOSTED_MACHINE_ID = 'HOSTED';
 
-/** Human-friendly prefix so a key is recognizable at a glance. */
+/**
+ * Default license-token prefix. Multi-product callers pass the product's
+ * license_prefix to signLicense / verifyLicenseSignature instead.
+ */
 export const KEY_PREFIX = 'VRDX1';
 
 export interface LicensePayload {
@@ -80,14 +86,18 @@ function fromB64url(s: string): Buffer {
 
 /**
  * Sign a license payload with an Ed25519 PRIVATE key (PEM, pkcs8).
- * Returns the full license key string: `VRDX1.<payload>.<signature>`.
+ * Returns `<licensePrefix>.<payload>.<signature>` (default prefix: VRDX1).
  * Only the generator app should ever call this.
  */
-export function signLicense(payload: LicensePayload, privateKeyPem: string): string {
+export function signLicense(
+  payload: LicensePayload,
+  privateKeyPem: string,
+  licensePrefix: string = KEY_PREFIX
+): string {
   const data = Buffer.from(JSON.stringify(payload), 'utf8');
   // For Ed25519 the digest algorithm MUST be null (the algorithm is implied).
   const signature = crypto.sign(null, data, privateKeyPem);
-  return `${KEY_PREFIX}.${b64url(data)}.${b64url(signature)}`;
+  return `${licensePrefix}.${b64url(data)}.${b64url(signature)}`;
 }
 
 /**
@@ -95,10 +105,14 @@ export function signLicense(payload: LicensePayload, privateKeyPem: string): str
  * Returns the decoded payload when the signature is authentic. Does NOT check
  * machine binding or expiry — that's the verifier's job (see verify.ts).
  */
-export function verifyLicenseSignature(key: string, publicKeyPem: string): VerifyResult {
+export function verifyLicenseSignature(
+  key: string,
+  publicKeyPem: string,
+  expectedPrefix: string = KEY_PREFIX
+): VerifyResult {
   try {
     const parts = (key || '').trim().split('.');
-    if (parts.length !== 3 || parts[0] !== KEY_PREFIX) {
+    if (parts.length !== 3 || parts[0] !== expectedPrefix) {
       return { valid: false, reason: 'malformed-key' };
     }
 
