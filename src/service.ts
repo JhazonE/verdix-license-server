@@ -14,6 +14,7 @@ import {
   LICENSE_FORMAT_VERSION,
 } from './licensing/core';
 import { getPrivateKeyPem } from './keys';
+import { getProduct, DEFAULT_PRODUCT_ID } from './products';
 import { query, withTransaction } from './db';
 import {
   getCachedLicense,
@@ -46,6 +47,7 @@ export type LicenseStatus = 'active' | 'suspended' | 'revoked';
 export interface License {
   id: string;
   customer_id: string;
+  product_id: string;
   product_key: string;
   edition: string;
   type: LicenseType;
@@ -69,9 +71,9 @@ function randomGroup(len: number): string {
   return out;
 }
 
-/** e.g. VRDX-7QК4-9FH2-MN8P (prefix + 3 groups of 4). */
-export function generateProductKey(): string {
-  return ['VRDX', randomGroup(4), randomGroup(4), randomGroup(4)].join('-');
+/** e.g. VRDX-7QK4-9FH2-MN8P (product key_prefix + 3 groups of 4). */
+export function generateProductKey(prefix: string = 'VRDX'): string {
+  return [prefix, randomGroup(4), randomGroup(4), randomGroup(4)].join('-');
 }
 
 // ── Customers ────────────────────────────────────────────────────────────────
@@ -118,6 +120,7 @@ export async function getCustomer(id: string): Promise<Customer | null> {
 // ── Licenses ─────────────────────────────────────────────────────────────────
 export async function createLicense(input: {
   customer_id: string;
+  product_id?: string;
   edition?: string;
   type: LicenseType;
   expires_at?: string | null; // ISO/date for subscription
@@ -136,21 +139,29 @@ export async function createLicense(input: {
       ? new Date(input.expires_at).toISOString().slice(0, 19).replace('T', ' ')
       : null;
 
+  const productId = (input.product_id || DEFAULT_PRODUCT_ID).trim();
+  const product = await getProduct(productId);
+  if (!product) throw new Error(`Unknown product "${productId}".`);
+  if (product.status !== 'active') {
+    throw new Error(`Product "${productId}" is inactive; cannot issue new licenses.`);
+  }
+
   // Generate a unique product key (retry on the rare collision).
-  let productKey = generateProductKey();
+  let productKey = generateProductKey(product.key_prefix);
   for (let attempt = 0; attempt < 5; attempt++) {
     const clash = await query<any[]>(`SELECT id FROM licenses WHERE product_key = ?`, [productKey]);
     if (clash.length === 0) break;
-    productKey = generateProductKey();
+    productKey = generateProductKey(product.key_prefix);
   }
 
   await query(
     `INSERT INTO licenses
-       (id, customer_id, product_key, edition, type, expires_at, max_activations, features, notes, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, customer_id, product_id, product_key, edition, type, expires_at, max_activations, features, notes, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.customer_id,
+      productId,
       productKey,
       (input.edition || 'standard').trim(),
       input.type,
@@ -288,7 +299,7 @@ export async function issueSignedLicense(
   const payload: LicensePayload = {
     v: LICENSE_FORMAT_VERSION,
     lid: license.id,
-    product: PRODUCT_ID,
+    product: license.product_id || DEFAULT_PRODUCT_ID,
     customer: customer?.business_name || 'Unknown',
     edition: license.edition,
     machineId,
@@ -297,7 +308,15 @@ export async function issueSignedLicense(
     features: license.features || [],
   };
 
-  const signedLicense = signLicense(payload, getPrivateKeyPem());
+  const signingProduct = await getProduct(license.product_id || DEFAULT_PRODUCT_ID);
+  if (!signingProduct) {
+    throw new Error(`Unknown product "${license.product_id}" on license ${license.id}.`);
+  }
+  const signedLicense = signLicense(
+    payload,
+    getPrivateKeyPem(signingProduct),
+    signingProduct.license_prefix
+  );
 
   if (opts.record !== false) {
     const activationId = crypto.randomUUID();
