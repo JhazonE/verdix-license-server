@@ -22,6 +22,21 @@ const TABLES: { name: string; sql: string }[] = [
     `,
   },
   {
+    name: 'products',
+    sql: `
+      CREATE TABLE IF NOT EXISTS products (
+        id             VARCHAR(64) PRIMARY KEY,
+        name           VARCHAR(255) NOT NULL,
+        key_prefix     VARCHAR(16) NOT NULL,
+        license_prefix VARCHAR(16) NOT NULL,
+        public_key     TEXT NULL,
+        env_key_name   VARCHAR(64) NOT NULL,
+        status         ENUM('active','inactive') NOT NULL DEFAULT 'active',
+        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `,
+  },
+  {
     name: 'licenses',
     sql: `
       CREATE TABLE IF NOT EXISTS licenses (
@@ -111,12 +126,57 @@ const TABLES: { name: string; sql: string }[] = [
   },
 ];
 
+/**
+ * Additive column migrations. Each runs only when the column is absent, so
+ * this stays idempotent like the CREATE TABLE statements above.
+ */
+const COLUMNS: { table: string; column: string; sql: string }[] = [
+  {
+    table: 'licenses',
+    column: 'product_id',
+    sql: `ALTER TABLE licenses
+            ADD COLUMN product_id VARCHAR(64) NOT NULL DEFAULT 'verdix-pos'`,
+  },
+];
+
+async function applyColumns(): Promise<void> {
+  for (const c of COLUMNS) {
+    const rows = await query<any[]>(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+      [c.table, c.column]
+    );
+    if (rows.length > 0) {
+      console.log(`  · column exists: ${c.table}.${c.column}`);
+      continue;
+    }
+    await query(c.sql);
+    console.log(`  ✓ column added: ${c.table}.${c.column}`);
+  }
+}
+
+/**
+ * The verdix-pos row must exist before any license references it. Its values
+ * reproduce the pre-multi-product hardcoded constants exactly, which is what
+ * makes already-issued licenses keep working.
+ */
+async function seedDefaultProduct(): Promise<void> {
+  await query(
+    `INSERT IGNORE INTO products
+       (id, name, key_prefix, license_prefix, env_key_name, status)
+     VALUES ('verdix-pos', 'Verdix POS', 'VRDX', 'VRDX1', 'LICENSE_PRIVATE_KEY', 'active')`
+  );
+  console.log('  ✓ product seeded: verdix-pos');
+}
+
 export async function migrate(): Promise<void> {
   await ensureDatabase();
   for (const t of TABLES) {
     await query(t.sql);
     console.log('  ✓ table ready: ' + t.name);
   }
+  await applyColumns();
+  await seedDefaultProduct();
 }
 
 if (require.main === module) {
