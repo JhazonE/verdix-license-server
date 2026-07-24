@@ -1,6 +1,7 @@
 /* Vendix LMS dashboard logic (vanilla JS). */
 
 let customersCache = [];
+let productsCache = [];
 let licensesCache = [];
 let activationsCache = [];
 let usersCache = [];
@@ -109,12 +110,13 @@ function closeModal(id) { document.getElementById(id).classList.remove('show'); 
 const TAB_META = {
   overview:    ['Overview',             'License management at a glance'],
   customers:   ['Customers',            'Businesses you sell licenses to'],
+  products:    ['Products',             'Applications you issue licenses for'],
   licenses:    ['Licenses',             'Issue and manage product keys'],
   activations: ['Activations',          'Machines currently using your licenses'],
   users:       ['Team',                 'Administrators who can access this dashboard'],
   config:      ['System Configuration', 'Backup, restore, and reset license data'],
 };
-const ALL_TABS = ['overview', 'customers', 'licenses', 'activations', 'users', 'config'];
+const ALL_TABS = ['overview', 'customers', 'products', 'licenses', 'activations', 'users', 'config'];
 function showTab(tab) {
   ALL_TABS.forEach((t) => {
     document.getElementById('tab-' + t).classList.toggle('hidden', t !== tab);
@@ -125,6 +127,7 @@ function showTab(tab) {
   if (m) { $('page-title').textContent = m[0]; $('page-sub').textContent = m[1]; }
   if (tab === 'overview')    loadStats();
   if (tab === 'customers')   loadCustomers();
+  if (tab === 'products')    loadProducts();
   if (tab === 'licenses')    loadLicenses();
   if (tab === 'activations') loadActivations();
   if (tab === 'users')       loadUsers();
@@ -194,23 +197,92 @@ async function saveCustomer() {
   toast('Customer added successfully.', 'success', 'Customer Created');
 }
 
+// ── Products ──────────────────────────────────────────────────────────────────
+async function loadProducts() {
+  const el = $('products-table');
+  if (el) el.innerHTML = skeletonTable(6);
+  const { data } = await api('/api/products');
+  productsCache = data || [];
+  renderProducts();
+}
+function productName(id) {
+  const p = productsCache.find((x) => x.id === id);
+  return p ? p.name : (id || '—');
+}
+function renderProducts() {
+  const el = $('products-table');
+  if (!el) return;
+  if (!productsCache.length) { setCount('products-count', 0, 0); el.innerHTML = '<div class="empty">No products yet. Click "New Product".</div>'; return; }
+  const q = val('products-search');
+  const data = productsCache.filter((p) => matchesQuery(p, ['name', 'id', 'key_prefix', 'license_prefix', 'env_key_name'], q));
+  setCount('products-count', data.length, productsCache.length);
+  if (!data.length) { el.innerHTML = '<div class="empty">No products match your search.</div>'; return; }
+  el.innerHTML = `<table><thead><tr><th>Name</th><th>ID</th><th>Key Prefix</th><th>License Prefix</th><th>Env Var</th><th>Public Key</th></tr></thead><tbody>${
+    data.map((p) => `<tr>
+      <td><strong>${esc(p.name)}</strong></td>
+      <td><code class="key">${esc(p.id)}</code></td>
+      <td><code class="key">${esc(p.key_prefix)}</code></td>
+      <td><code class="key">${esc(p.license_prefix)}</code></td>
+      <td><code class="key">${esc(p.env_key_name)}</code></td>
+      <td>${p.public_key
+        ? '<span class="pill active">present</span>'
+        : '<span class="pill suspended">missing</span>'}</td>
+    </tr>`).join('')
+  }</tbody></table>`;
+}
+function openProductModal() {
+  ['p-id','p-name','p-key-prefix','p-license-prefix','p-env-key'].forEach(id => { const el = $(id); if (el) el.value = ''; });
+  $('p-err').classList.remove('show');
+  show('product-modal');
+}
+async function saveProduct() {
+  const body = {
+    id: val('p-id'), name: val('p-name'), key_prefix: val('p-key-prefix'),
+    license_prefix: val('p-license-prefix'), env_key_name: val('p-env-key'),
+  };
+  const err = $('p-err');
+  err.classList.remove('show');
+  if (!body.id.trim() || !body.name.trim() || !body.key_prefix.trim() || !body.license_prefix.trim() || !body.env_key_name.trim()) {
+    err.textContent = 'All fields are required.'; err.classList.add('show'); return;
+  }
+  const res = await api('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.success) { err.textContent = res.error; err.classList.add('show'); return; }
+  closeModal('product-modal');
+  loadProducts();
+  toast('Product added successfully.', 'success', 'Product Created');
+}
+
 // ── Licenses ──────────────────────────────────────────────────────────────────
 async function loadLicenses() {
-  $('licenses-table').innerHTML = skeletonTable(8);
+  $('licenses-table').innerHTML = skeletonTable(9);
+  if (!productsCache.length) { try { await loadProducts(); } catch {} }
   const { data } = await api('/api/licenses');
   licensesCache = data;
+  renderLicenseProductFilter();
   renderLicenses();
+}
+function renderLicenseProductFilter() {
+  const sel = $('licenses-product-filter');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">All products</option>' +
+    productsCache.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  sel.value = current;
 }
 function renderLicenses() {
   const el = $('licenses-table');
   if (!licensesCache.length) { setCount('licenses-count', 0, 0); el.innerHTML = '<div class="empty">No licenses yet. Click "Issue License".</div>'; return; }
   const q = val('licenses-search');
-  const data = licensesCache.filter((l) => matchesQuery(l, ['product_key', 'business_name', 'edition', 'status', 'type'], q));
+  const productFilter = val('licenses-product-filter');
+  const data = licensesCache
+    .filter((l) => !productFilter || l.product_id === productFilter)
+    .filter((l) => matchesQuery(l, ['product_key', 'business_name', 'edition', 'status', 'type', 'product_id'], q));
   setCount('licenses-count', data.length, licensesCache.length);
   if (!data.length) { el.innerHTML = '<div class="empty">No licenses match your search.</div>'; return; }
-  el.innerHTML = `<table><thead><tr><th>Product Key</th><th>Customer</th><th>Edition</th><th>Type</th><th>Expires</th><th>Computers</th><th>Status</th><th></th></tr></thead><tbody>${
+  el.innerHTML = `<table><thead><tr><th>Product Key</th><th>Product</th><th>Customer</th><th>Edition</th><th>Type</th><th>Expires</th><th>Computers</th><th>Status</th><th></th></tr></thead><tbody>${
     data.map((l) => `<tr>
       <td><code class="key">${esc(l.product_key)}</code></td>
+      <td>${esc(productName(l.product_id))}</td>
       <td>${esc(l.business_name)}</td>
       <td>${esc(l.edition)}</td>
       <td><span class="pill ${l.type}">${l.type}</span></td>
@@ -235,6 +307,9 @@ function openLicenseModal() {
     return;
   }
   $('l-customer').innerHTML = customersCache.map((c) => `<option value="${c.id}">${esc(c.business_name)}</option>`).join('');
+  const active = productsCache.filter((p) => p.status !== 'inactive');
+  $('l-product').innerHTML = active.map((p) => `<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.key_prefix)})</option>`).join('');
+  if (active.some((p) => p.id === 'verdix-pos')) $('l-product').value = 'verdix-pos';
   $('l-edition').value = 'standard'; $('l-type').value = 'perpetual'; $('l-days').value = ''; $('l-expires').value = '';
   $('l-seats').value = '1'; $('l-features').value = ''; $('l-notes').value = '';
   $('l-err').classList.remove('show');
@@ -244,7 +319,8 @@ function openLicenseModal() {
 async function saveLicense() {
   const type = val('l-type');
   const body = {
-    customer_id: val('l-customer'), edition: val('l-edition'), type,
+    customer_id: val('l-customer'), product_id: val('l-product') || undefined,
+    edition: val('l-edition'), type,
     max_activations: parseInt(val('l-seats') || '1', 10),
     features: val('l-features').split(',').map((f) => f.trim()).filter(Boolean),
     notes: val('l-notes'),

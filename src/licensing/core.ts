@@ -1,7 +1,15 @@
-// DUPLICATED from the Verdix POS repo (lib/licensing/core.ts).
-// This is the Ed25519 signing/verification contract. If the key format or
-// algorithm changes here, apply the identical change to lib/licensing/core.ts
-// in the POS repo, or previously issued licenses will fail verification.
+// Shares a crypto contract with lib/licensing/core.ts in the Verdix POS repo.
+//
+// The two files intentionally DIVERGE: this one is multi-product (product id
+// and token prefix are parameters); the POS copy is a single-product verifier
+// that keeps PRODUCT_ID/KEY_PREFIX as local constants. Do not "fix" that.
+//
+// What MUST stay identical on both sides, or already-issued licenses stop
+// verifying:
+//   1. The LicensePayload shape (field names, types, JSON serialization).
+//   2. The signature scheme: Ed25519, crypto.sign(null, data, key) over the
+//      UTF-8 JSON of the payload.
+//   3. The token layout: <prefix>.<base64url payload>.<base64url signature>.
 
 /**
  * Verdix POS — License Cryptography Core

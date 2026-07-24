@@ -184,6 +184,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         <span>Customers</span>
       </button>
+      <button data-tab="products" onclick="showTab('products')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg>
+        <span>Products</span>
+      </button>
       <button data-tab="licenses" onclick="showTab('licenses')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M15.5 7.5 19 4M21 2l-2 2M2 22l8.5-8.5"/><circle cx="7.5" cy="15.5" r="5.5"/></svg>
         <span>Licenses</span>
@@ -236,10 +240,23 @@
         <div class="card" id="customers-table"></div>
       </section>
 
+      <section id="tab-products" class="hidden">
+        <div class="bar">
+          <h3>Products</h3><span class="count" id="products-count"></span>
+          <div class="spacer"></div>
+          <input class="search" id="products-search" placeholder="Search name, id, prefix…" oninput="renderProducts()" />
+          <button class="btn" onclick="openProductModal()">+ New Product</button>
+        </div>
+        <div class="card" id="products-table"></div>
+      </section>
+
       <section id="tab-licenses" class="hidden">
         <div class="bar">
           <h3>Licenses</h3><span class="count" id="licenses-count"></span>
           <div class="spacer"></div>
+          <select id="licenses-product-filter" style="width:auto;padding:9px 12px;font-size:13px;border-radius:10px" onchange="renderLicenses()">
+            <option value="">All products</option>
+          </select>
           <input class="search" id="licenses-search" placeholder="Search key, customer, status…" oninput="renderLicenses()" />
           <button class="btn" onclick="openLicenseModal()">+ Issue License</button>
         </div>
@@ -351,6 +368,32 @@
     </div>
   </div>
 
+  <!-- Product drawer -->
+  <div class="drawer-overlay" id="product-modal" onclick="if(event.target===this)closeModal('product-modal')">
+    <div class="drawer">
+      <div class="drawer-head">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg></div>
+        <div><h3>New Product</h3><p>Each product gets its own key prefixes and signing key</p></div>
+        <button class="x" onclick="closeModal('product-modal')">✕</button>
+      </div>
+      <div class="drawer-body">
+        <label>Product ID *</label><input id="p-id" placeholder="e.g. verdix-inventory" autocomplete="off" />
+        <label>Name *</label><input id="p-name" placeholder="e.g. Verdix Inventory" />
+        <div class="row">
+          <div><label>Key Prefix *</label><input id="p-key-prefix" placeholder="VRDX" autocomplete="off" /></div>
+          <div><label>License Prefix *</label><input id="p-license-prefix" placeholder="VRDX1" autocomplete="off" /></div>
+        </div>
+        <label>Env Key Name *</label><input id="p-env-key" placeholder="LICENSE_PRIVATE_KEY_VERDIX_INVENTORY" autocomplete="off" />
+        <p class="muted" style="margin:10px 0 0;font-size:12px">The product key shown to customers starts with the <strong>key prefix</strong> (e.g. <code class="key">VRDX-7QK4-…</code>). The signed license token starts with the <strong>license prefix</strong>. The <strong>env key name</strong> is the environment variable holding this product's Ed25519 private key.</p>
+        <div class="err" id="p-err"></div>
+      </div>
+      <div class="drawer-foot">
+        <button class="btn ghost" onclick="closeModal('product-modal')">Cancel</button>
+        <button class="btn" onclick="saveProduct()">Save Product</button>
+      </div>
+    </div>
+  </div>
+
   <!-- License drawer -->
   <div class="drawer-overlay" id="license-modal" onclick="if(event.target===this)closeModal('license-modal')">
     <div class="drawer">
@@ -362,6 +405,8 @@
       <div class="drawer-body">
         <label>Customer *</label>
         <select id="l-customer"></select>
+        <label>Product *</label>
+        <select id="l-product"></select>
         <div class="row">
           <div><label>Edition</label>
             <select id="l-edition"><option>standard</option><option>enterprise</option><option>trial</option></select>

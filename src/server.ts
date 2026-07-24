@@ -33,6 +33,7 @@ import {
   SessionPayload,
 } from './auth';
 import * as svc from './service';
+import { listProducts, createProduct } from './products';
 import { hasPrivateKey } from './keys';
 
 dotenv.config();
@@ -276,6 +277,20 @@ async function handle(req: Req, res: Res) {
         return sendJson(res, 200, { success: true, data: await svc.createCustomer(body) });
       }
 
+      // Products
+      if (method === 'GET' && p === '/api/products') {
+        return sendJson(res, 200, { success: true, data: await listProducts() });
+      }
+      if (method === 'POST' && p === '/api/products') {
+        const body = await readBody(req);
+        try {
+          const created = await createProduct(body);
+          return sendJson(res, 200, { success: true, data: created });
+        } catch (e) {
+          return sendJson(res, 400, { success: false, error: (e as Error).message });
+        }
+      }
+
       // Licenses
       if (method === 'GET' && p === '/api/licenses') {
         return sendJson(res, 200, { success: true, data: await svc.listLicenses() });
@@ -283,7 +298,11 @@ async function handle(req: Req, res: Res) {
       if (method === 'POST' && p === '/api/licenses') {
         const body = await readBody(req);
         if (!body.customer_id) return sendJson(res, 400, { success: false, error: 'customer_id required.' });
-        const lic = await svc.createLicense({ ...body, created_by: session.username });
+        const lic = await svc.createLicense({
+          ...body,
+          product_id: body.product_id,
+          created_by: session.username,
+        });
         return sendJson(res, 200, { success: true, data: lic });
       }
 
