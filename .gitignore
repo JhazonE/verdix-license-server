@@ -4,3 +4,6 @@ node_modules/
 .env
 dist/
 *.log
+
+# SDD scratch (briefs, reports, review diffs)
+.superpowers/
