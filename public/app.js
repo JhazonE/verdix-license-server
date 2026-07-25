@@ -217,8 +217,9 @@ function renderProducts() {
   const data = productsCache.filter((p) => matchesQuery(p, ['name', 'id', 'key_prefix', 'license_prefix', 'env_key_name'], q));
   setCount('products-count', data.length, productsCache.length);
   if (!data.length) { el.innerHTML = '<div class="empty">No products match your search.</div>'; return; }
-  el.innerHTML = `<table><thead><tr><th>Name</th><th>ID</th><th>Key Prefix</th><th>License Prefix</th><th>Env Var</th><th>Public Key</th></tr></thead><tbody>${
-    data.map((p) => `<tr>
+  el.innerHTML = `<table><thead><tr><th></th><th>Name</th><th>ID</th><th>Key Prefix</th><th>License Prefix</th><th>Env Var</th><th>Public Key</th><th>Setup</th></tr></thead><tbody>${
+    data.map((p) => `<tr class="expandable" onclick="toggleProductSetup('${esc(p.id)}')">
+      <td><span class="chev" id="chev-${esc(p.id)}">›</span></td>
       <td><strong>${esc(p.name)}</strong></td>
       <td><code class="key">${esc(p.id)}</code></td>
       <td><code class="key">${esc(p.key_prefix)}</code></td>
@@ -227,7 +228,9 @@ function renderProducts() {
       <td>${p.public_key
         ? '<span class="pill active">present</span>'
         : '<span class="pill suspended">missing</span>'}</td>
-    </tr>`).join('')
+      <td id="setup-pill-${esc(p.id)}"><span class="muted" style="font-size:12px">—</span></td>
+    </tr>
+    <tr class="detail hidden" id="detail-${esc(p.id)}"><td colspan="8"><div id="setup-${esc(p.id)}"></div></td></tr>`).join('')
   }</tbody></table>`;
 }
 function openProductModal() {
@@ -250,6 +253,151 @@ async function saveProduct() {
   closeModal('product-modal');
   loadProducts();
   toast('Product added successfully.', 'success', 'Product Created');
+}
+
+// ── Product setup checklist ───────────────────────────────────────────────────
+// The four setup steps are not equally knowable. Three are derived from server
+// state; embedding the public key happens in the product's own repo, so the
+// operator marks it and the mark is bound to the key's fingerprint.
+const setupCache = {};
+
+async function toggleProductSetup(id) {
+  const row = $('detail-' + id);
+  const chev = $('chev-' + id);
+  if (!row) return;
+  const opening = row.classList.contains('hidden');
+  row.classList.toggle('hidden', !opening);
+  if (chev) chev.classList.toggle('open', opening);
+  if (!opening) return;
+
+  const panel = $('setup-' + id);
+  if (setupCache[id]) { panel.innerHTML = renderSetupPanel(setupCache[id]); return; }
+  panel.innerHTML = '<div class="setup"><span class="muted">Loading setup status…</span></div>';
+  await loadProductSetup(id);
+}
+
+async function loadProductSetup(id) {
+  const res = await api('/api/products/' + encodeURIComponent(id) + '/setup');
+  if (!res.success) {
+    $('setup-' + id).innerHTML = `<div class="setup"><span class="muted">${esc(res.error || 'Could not load setup status.')}</span></div>`;
+    return;
+  }
+  setupCache[id] = res.data;
+  $('setup-' + id).innerHTML = renderSetupPanel(res.data);
+  renderSetupPill(id, res.data.pill);
+}
+
+function renderSetupPill(id, pill) {
+  const cell = $('setup-pill-' + id);
+  if (!cell) return;
+  const map = {
+    'ready':       ['active',    'Ready'],
+    'needs-setup': ['suspended', 'Needs setup'],
+    'stale':       ['stale',     'Stale'],
+  };
+  const [cls, label] = map[pill] || ['suspended', 'Unknown'];
+  cell.innerHTML = `<span class="pill ${cls}">${label}</span>`;
+}
+
+function copyBtn(text, label) {
+  // Base64 so quotes/newlines in the value can't break out of the attribute.
+  return `<button class="btn ghost sm" onclick="event.stopPropagation();copyValue('${btoa(unescape(encodeURIComponent(text)))}','${esc(label)}')">copy</button>`;
+}
+
+async function copyValue(b64, label) {
+  try {
+    await navigator.clipboard.writeText(decodeURIComponent(escape(atob(b64))));
+    toast(label + ' copied to clipboard.', 'success');
+  } catch {
+    toast('Could not copy to clipboard.', 'error');
+  }
+}
+
+function renderSetupPanel(d) {
+  const s = d.steps;
+
+  // Step 1 — always satisfied; the row exists because it's registered.
+  const step1 = `<div class="setup-step">
+    <span class="mark ok">✓</span>
+    <div><h4>1. Registered</h4>
+      <div class="note"><code class="key">${esc(d.productId)}</code> · product keys look like <code class="key">${esc(d.keyPrefix)}-XXXX-XXXX-XXXX</code></div></div>
+  </div>`;
+
+  // Step 2 — a stored public key means keygen ran for this product.
+  const step2 = s.keypair.ok
+    ? `<div class="setup-step">
+        <span class="mark ok">✓</span>
+        <div><h4>2. Signing keypair</h4>
+          <div class="note">Public key stored on the product row.</div></div>
+      </div>`
+    : `<div class="setup-step">
+        <span class="mark bad">✗</span>
+        <div><h4>2. Signing keypair</h4>
+          <div class="note">No keypair yet. Run this, then reopen this panel:</div>
+          <pre>npm run keygen -- --product ${esc(d.productId)}</pre>
+          <div class="copyrow">${copyBtn('npm run keygen -- --product ' + d.productId, 'Command')}</div></div>
+      </div>`;
+
+  // Step 3 — operator-marked. All three verifier overrides are shown together
+  // because each one, if missed, fails silently: a wrong prefix reports
+  // malformed-key and a wrong product id reports wrong-product.
+  const embedHead = {
+    done:    ['ok',   '✓', `Marked by ${esc(s.embed.by || '—')} · ${s.embed.at ? fmtDate(s.embed.at) : '—'}`],
+    pending: ['todo', '→', 'You must do this in the product\'s own repo — the server cannot verify it.'],
+    stale:   ['bad',  '⚠', `STALE — the key changed since this was marked${s.embed.by ? ` by ${esc(s.embed.by)} · ${fmtDate(s.embed.at)}` : ''}. Re-embed the key below.`],
+  }[s.embed.state];
+
+  const keyBlock = d.publicKey
+    ? `<pre>${esc(d.publicKey.trim())}</pre>
+       <div class="copyrow"><span class="lbl">public key</span>${copyBtn(d.publicKey.trim(), 'Public key')}</div>`
+    : '<div class="note">No public key yet — complete step 2 first.</div>';
+
+  const step3 = `<div class="setup-step">
+    <span class="mark ${embedHead[0]}">${embedHead[1]}</span>
+    <div><h4>3. Embed the public key in your app</h4>
+      <div class="note">${embedHead[2]}</div>
+      ${keyBlock}
+      <div class="note" style="margin-top:12px">Your verifier must override <strong>all three</strong>:</div>
+      <div class="copyrow"><span class="lbl">product id</span><code class="key">${esc(d.productId)}</code>${copyBtn(d.productId, 'Product id')}</div>
+      <div class="copyrow"><span class="lbl">license prefix</span><code class="key">${esc(d.licensePrefix)}</code>${copyBtn(d.licensePrefix, 'License prefix')}</div>
+      <div class="copyrow"><span class="lbl">public key</span><span class="note">shown above</span></div>
+      ${d.publicKey ? `<div class="copyrow" style="margin-top:12px">
+        ${s.embed.state === 'done'
+          ? `<button class="btn ghost sm" onclick="event.stopPropagation();markEmbedded('${esc(d.productId)}',false)">Unmark</button>`
+          : `<button class="btn sm" onclick="event.stopPropagation();markEmbedded('${esc(d.productId)}',true)">${s.embed.state === 'stale' ? 'Re-mark as embedded' : '✓ Mark as embedded'}</button>`}
+      </div>` : ''}
+    </div>
+  </div>`;
+
+  // Step 4 — names the source rather than claiming "deployed", because this
+  // only describes the server you're talking to right now.
+  const srcNote = {
+    'env':        ['ok',   '✓', `Resolved from <code class="key">${esc(d.envKeyName)}</code> — the production path.`],
+    'local-file': ['warn', '⚠', `Resolved from <code class="key">keys/${esc(d.productId)}/private-key.pem</code> only. This dashboard can't see your Railway environment, so a production deploy is <strong>not</strong> confirmed.`],
+    'none':       ['bad',  '✗', 'No signing key found. Complete step 2, or set the env var below.'],
+  }[s.signing.source];
+
+  const step4 = `<div class="setup-step">
+    <span class="mark ${srcNote[0]}">${srcNote[1]}</span>
+    <div><h4>4. Deploy the private key</h4>
+      <div class="note">${srcNote[2]}</div>
+      <div class="copyrow"><span class="lbl">env var</span><code class="key">${esc(d.envKeyName)}</code>${copyBtn(d.envKeyName, 'Env var name')}</div>
+      <div class="note">Set it to the contents of <code class="key">keys/${esc(d.productId)}/private-key.pem</code>. Never commit it.</div></div>
+  </div>`;
+
+  return `<div class="setup">${step1}${step2}${step3}${step4}</div>`;
+}
+
+async function markEmbedded(id, marked) {
+  const res = await api('/api/products/' + encodeURIComponent(id) + '/embed', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ marked }),
+  });
+  if (!res.success) { toast(res.error || 'Could not update the mark.', 'error'); return; }
+  delete setupCache[id];
+  await loadProductSetup(id);
+  toast(marked ? 'Marked as embedded.' : 'Mark cleared.', 'success');
 }
 
 // ── Licenses ──────────────────────────────────────────────────────────────────
