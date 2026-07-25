@@ -20,6 +20,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { Product } from './products';
+import type { PrivateKeySource } from './setup-status';
 
 const DEFAULT_ENV_VAR = 'LICENSE_PRIVATE_KEY';
 const DEFAULT_PRODUCT_ID = 'verdix-pos';
@@ -40,6 +41,30 @@ function keyFilePaths(productId: string): string[] {
   return paths;
 }
 
+/**
+ * Single resolution point for a product's private key, shared by
+ * getPrivateKeyPem and getPrivateKeySource so the source the dashboard reports
+ * can never disagree with the key actually used for signing.
+ *
+ * Deliberately does NOT consult the module cache: the cache stores only the
+ * PEM, so a cached hit cannot say where the key came from.
+ */
+function resolveKey(
+  productId: string,
+  envVar: string
+): { pem: string; source: PrivateKeySource } | null {
+  const fromEnv = process.env[envVar];
+  if (fromEnv && fromEnv.includes('BEGIN')) {
+    return { pem: normalizePem(fromEnv), source: 'env' };
+  }
+  for (const filePath of keyFilePaths(productId)) {
+    if (fs.existsSync(filePath)) {
+      return { pem: fs.readFileSync(filePath, 'utf8'), source: 'local-file' };
+    }
+  }
+  return null;
+}
+
 export function getPrivateKeyPem(product?: Product): string {
   const productId = product?.id ?? DEFAULT_PRODUCT_ID;
   const envVar = product?.env_key_name ?? DEFAULT_ENV_VAR;
@@ -47,25 +72,30 @@ export function getPrivateKeyPem(product?: Product): string {
   const hit = cache.get(productId);
   if (hit) return hit;
 
-  const fromEnv = process.env[envVar];
-  if (fromEnv && fromEnv.includes('BEGIN')) {
-    const pem = normalizePem(fromEnv);
-    cache.set(productId, pem);
-    return pem;
-  }
-
-  for (const filePath of keyFilePaths(productId)) {
-    if (fs.existsSync(filePath)) {
-      const pem = fs.readFileSync(filePath, 'utf8');
-      cache.set(productId, pem);
-      return pem;
-    }
+  const resolved = resolveKey(productId, envVar);
+  if (resolved) {
+    cache.set(productId, resolved.pem);
+    return resolved.pem;
   }
 
   throw new Error(
     `No signing key for product "${productId}". Set ${envVar}, or run ` +
       `\`npm run keygen -- --product ${productId}\`.`
   );
+}
+
+/**
+ * Where this server resolves the product's private key from — without returning
+ * any key material.
+ *
+ * NOTE: this describes THIS running server. Opening the dashboard locally
+ * reports 'local-file' even when Railway is correctly configured, which is why
+ * the UI names the source rather than claiming the key is deployed.
+ */
+export function getPrivateKeySource(product?: Product): PrivateKeySource {
+  const productId = product?.id ?? DEFAULT_PRODUCT_ID;
+  const envVar = product?.env_key_name ?? DEFAULT_ENV_VAR;
+  return resolveKey(productId, envVar)?.source ?? 'none';
 }
 
 export function hasPrivateKey(product?: Product): boolean {
