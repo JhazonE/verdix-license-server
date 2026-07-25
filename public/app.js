@@ -385,9 +385,12 @@ function renderSetupPanel(d) {
 
   // Step 4 — names the source rather than claiming "deployed", because this
   // only describes the server you're talking to right now.
+  // keyFile comes from the server, which knows verdix-pos uses the flat
+  // keys/private-key.pem; deriving keys/<id>/ here would name a missing file.
+  const keyFile = d.keyFile || `keys/${d.productId}/private-key.pem`;
   const srcNote = {
     'env':        ['ok',   '✓', `Resolved from <code class="key">${esc(d.envKeyName)}</code> — the production path.`],
-    'local-file': ['warn', '⚠', `Resolved from <code class="key">keys/${esc(d.productId)}/private-key.pem</code> only. This dashboard can't see your Railway environment, so a production deploy is <strong>not</strong> confirmed.`],
+    'local-file': ['warn', '⚠', `Resolved from <code class="key">${esc(keyFile)}</code> only. This dashboard can't see your Railway environment, so a production deploy is <strong>not</strong> confirmed.`],
     'none':       ['bad',  '✗', 'No signing key found. Complete step 2, or set the env var below.'],
   }[s.signing.source];
 
@@ -396,7 +399,7 @@ function renderSetupPanel(d) {
     <div><h4>4. Deploy the private key</h4>
       <div class="note">${srcNote[2]}</div>
       <div class="copyrow"><span class="lbl">env var</span><code class="key">${esc(d.envKeyName)}</code>${copyBtn(d.envKeyName, 'Env var name')}</div>
-      <div class="note">Set it to the contents of <code class="key">keys/${esc(d.productId)}/private-key.pem</code>. Never commit it.</div></div>
+      <div class="note">Set it to the contents of <code class="key">${esc(keyFile)}</code>. Never commit it.</div></div>
   </div>`;
 
   return `<div class="setup">${step1}${step2}${step3}${step4}</div>`;

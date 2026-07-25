@@ -98,6 +98,23 @@ export function getPrivateKeySource(product?: Product): PrivateKeySource {
   return resolveKey(productId, envVar)?.source ?? 'none';
 }
 
+/**
+ * Repo-relative path of the key file this product WOULD use, for display only.
+ *
+ * The dashboard must not derive this as `keys/<id>/private-key.pem`: verdix-pos
+ * predates per-product directories and lives at the flat `keys/private-key.pem`,
+ * so a derived path would point an operator at a file that does not exist.
+ * Returns the file that actually resolved when there is one, otherwise the
+ * preferred location to create.
+ */
+export function getKeyFileHint(product?: Product): string {
+  const productId = product?.id ?? DEFAULT_PRODUCT_ID;
+  const candidates = keyFilePaths(productId);
+  const existing = candidates.find((f) => fs.existsSync(f));
+  const chosen = existing ?? candidates[0];
+  return path.relative(path.join(__dirname, '..'), chosen).replace(/\\/g, '/');
+}
+
 export function hasPrivateKey(product?: Product): boolean {
   try {
     getPrivateKeyPem(product);

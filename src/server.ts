@@ -34,7 +34,7 @@ import {
 } from './auth';
 import * as svc from './service';
 import { listProducts, createProduct, getProduct, setProductEmbedMark } from './products';
-import { hasPrivateKey, getPrivateKeySource } from './keys';
+import { hasPrivateKey, getPrivateKeySource, getKeyFileHint } from './keys';
 import { publicKeyFingerprint, deriveEmbedState, deriveSetupPill } from './setup-status';
 
 dotenv.config();
@@ -327,6 +327,9 @@ async function handle(req: Req, res: Res) {
             keyPrefix: product.key_prefix,
             envKeyName: product.env_key_name,
             publicKey: product.public_key,
+            // Resolved server-side: verdix-pos uses the flat keys/private-key.pem,
+            // so the dashboard must not derive keys/<id>/private-key.pem itself.
+            keyFile: getKeyFileHint(product),
             pill: deriveSetupPill({ hasKeypair, source, embed }),
             steps: {
               registered: { ok: true },
