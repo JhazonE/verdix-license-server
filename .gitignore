@@ -7,3 +7,6 @@ dist/
 
 # SDD scratch (briefs, reports, review diffs)
 .superpowers/
+
+# Playwright MCP browser-verification artifacts
+.playwright-mcp/
