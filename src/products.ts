@@ -4,6 +4,7 @@
  * product.
  */
 import { query } from './db';
+import type { EmbedMark } from './setup-status';
 
 export const DEFAULT_PRODUCT_ID = 'verdix-pos';
 
@@ -15,6 +16,8 @@ export interface Product {
   public_key: string | null;
   env_key_name: string;
   status: 'active' | 'inactive';
+  /** Operator's embed mark, or null when never marked. See setup-status.ts. */
+  embed_marked: EmbedMark | null;
 }
 
 export async function getProduct(id: string): Promise<Product | null> {
@@ -73,4 +76,18 @@ export async function createProduct(input: {
 
 export async function setProductPublicKey(id: string, pem: string): Promise<void> {
   await query(`UPDATE products SET public_key = ? WHERE id = ?`, [pem, id.trim()]);
+}
+
+/**
+ * Record (or clear) the operator's assertion that this product's public key was
+ * embedded in its app. Pass null to clear.
+ *
+ * The caller computes key_fp from the CURRENT public_key — never from client
+ * input, which would let any fingerprint be marked and defeat stale detection.
+ */
+export async function setProductEmbedMark(id: string, mark: EmbedMark | null): Promise<void> {
+  await query(`UPDATE products SET embed_marked = ? WHERE id = ?`, [
+    mark ? JSON.stringify(mark) : null,
+    id.trim(),
+  ]);
 }

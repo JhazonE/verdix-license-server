@@ -141,6 +141,14 @@ const COLUMNS: { table: string; column: string; sql: string }[] = [
     sql: `ALTER TABLE licenses
             ADD COLUMN product_id VARCHAR(64) NOT NULL DEFAULT 'verdix-pos'`,
   },
+  {
+    table: 'products',
+    column: 'embed_marked',
+    // The operator's assertion that this product's public key was embedded in
+    // its app, as { at, by, key_fp }. NULL means never marked. key_fp binds the
+    // mark to the key it was made for, so a rotation invalidates it.
+    sql: `ALTER TABLE products ADD COLUMN embed_marked JSON NULL`,
+  },
 ];
 
 async function applyColumns(): Promise<void> {
