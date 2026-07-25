@@ -38,6 +38,12 @@ async function main() {
   const missing = await fetch(BASE + '/api/products/zzz-no-such-product/setup', { headers: auth });
   check('unknown product => 404', missing.status === 404);
 
+  // ── Malformed id (bad escape) 404s, not 500 ────────────────────────────────
+  const malformed1 = await fetch(BASE + '/api/products/%/setup', { headers: auth });
+  check('malformed id GET /setup => 404 (not 500)', malformed1.status === 404);
+  const malformed2 = await fetch(BASE + '/api/products/%/embed', { method: 'POST', headers: auth, body: JSON.stringify({}) });
+  check('malformed id POST /embed => 404 (not 500)', malformed2.status === 404);
+
   // ── Happy path shape ───────────────────────────────────────────────────────
   const res = await fetch(BASE + '/api/products/verdix-pos/setup', { headers: auth });
   check('verdix-pos setup => 200', res.status === 200);

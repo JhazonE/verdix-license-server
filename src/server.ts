@@ -119,6 +119,19 @@ function clientIp(req: Req): string {
   );
 }
 
+/**
+ * Decode a path segment, treating a malformed escape as "no such id" rather
+ * than letting URIError surface as a 500. url.pathname is not pre-decoded, so
+ * a stray '%' in the URL reaches decodeURIComponent verbatim.
+ */
+function decodeSegment(seg: string): string | null {
+  try {
+    return decodeURIComponent(seg);
+  } catch {
+    return null;
+  }
+}
+
 async function cloudConfigFor(license: { id: string; features: string[] | null }) {
   if (!license.features || !license.features.includes('cloud-sync')) return undefined;
   try {
@@ -297,7 +310,9 @@ async function handle(req: Req, res: Res) {
       // for the private key. No private key material is ever serialized.
       const setupMatch = p.match(/^\/api\/products\/([^/]+)\/setup$/);
       if (method === 'GET' && setupMatch) {
-        const product = await getProduct(decodeURIComponent(setupMatch[1]));
+        const id = decodeSegment(setupMatch[1]);
+        if (!id) return sendJson(res, 404, { success: false, error: 'Product not found.' });
+        const product = await getProduct(id);
         if (!product) return sendJson(res, 404, { success: false, error: 'Product not found.' });
 
         const source = getPrivateKeySource(product);
@@ -331,7 +346,9 @@ async function handle(req: Req, res: Res) {
       // that the public key was embedded in the product's app.
       const embedMatch = p.match(/^\/api\/products\/([^/]+)\/embed$/);
       if (method === 'POST' && embedMatch) {
-        const product = await getProduct(decodeURIComponent(embedMatch[1]));
+        const id = decodeSegment(embedMatch[1]);
+        if (!id) return sendJson(res, 404, { success: false, error: 'Product not found.' });
+        const product = await getProduct(id);
         if (!product) return sendJson(res, 404, { success: false, error: 'Product not found.' });
 
         const body = await readBody(req);
