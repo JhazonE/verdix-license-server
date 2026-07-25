@@ -237,8 +237,120 @@ function renderProducts() {
     }).join('')
   }</tbody></table>`;
 }
+// ── New Product: derive everything from the name ──────────────────────────────
+// Registering a product used to mean inventing four values by hand (id, two
+// prefixes, an env var name) with the rules explained in one paragraph below the
+// fields. All four are derivable from the name, so we generate them, show what
+// they actually produce, and check prefix availability BEFORE submitting —
+// createProduct rejects duplicate prefixes, and the prefixes are UNIQUE columns,
+// so a clash discovered after saving is annoying to undo.
+let _productFieldsEdited = false;
+
+/** Lowercase, dash-separated id. Mirrors createProduct's /^[a-z0-9][a-z0-9-]*$/. */
+function slugifyProductId(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-')
+    .slice(0, 64);
+}
+
+/**
+ * 4-letter key prefix from the name's words: initials when there are several
+ * (Verdix Inventory -> VINV uses first letter + 3 of the last word), otherwise
+ * the first four letters. Falls back to padding so the result is always 2-4
+ * chars of A-Z0-9, which is what the product-key format expects.
+ */
+function suggestKeyPrefix(name) {
+  const words = String(name || '').toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').split(/\s+/).filter(Boolean);
+  if (!words.length) return '';
+  let p = words.length === 1
+    ? words[0].slice(0, 4)
+    : (words[0][0] + words[words.length - 1].slice(0, 3));
+  return p.replace(/[^A-Z0-9]/g, '').slice(0, 4);
+}
+
+/** Env var name: LICENSE_PRIVATE_KEY_<PREFIX>. Column is VARCHAR(64). */
+function suggestEnvKey(keyPrefix) {
+  return ('LICENSE_PRIVATE_KEY_' + String(keyPrefix || '').toUpperCase().replace(/[^A-Z0-9]/g, '')).slice(0, 64);
+}
+
+/** First prefix not already taken, trying PREFIX, PREFI2, PREFI3… */
+function firstFreeKeyPrefix(base) {
+  if (!base) return '';
+  const taken = new Set(productsCache.map((p) => (p.key_prefix || '').toUpperCase()));
+  const takenLic = new Set(productsCache.map((p) => (p.license_prefix || '').toUpperCase()));
+  if (!taken.has(base) && !takenLic.has(base + '1')) return base;
+  for (let n = 2; n <= 9; n++) {
+    const cand = (base.slice(0, 3) + n);
+    if (!taken.has(cand) && !takenLic.has(cand + '1')) return cand;
+  }
+  return base; // give up; the availability line will flag the clash
+}
+
+function onProductNameInput() {
+  // Once the operator edits a generated field by hand, stop overwriting it.
+  if (_productFieldsEdited) { renderProductPreview(); return; }
+  const name = val('p-name');
+  const keyPrefix = firstFreeKeyPrefix(suggestKeyPrefix(name));
+  $('p-id').value = slugifyProductId(name);
+  $('p-key-prefix').value = keyPrefix;
+  $('p-license-prefix').value = keyPrefix ? keyPrefix + '1' : '';
+  $('p-env-key').value = keyPrefix ? suggestEnvKey(keyPrefix) : '';
+  renderProductPreview();
+}
+
+function onProductFieldEdited() {
+  _productFieldsEdited = true;
+  renderProductPreview();
+}
+
+function renderProductPreview() {
+  const id = val('p-id'), kp = val('p-key-prefix').toUpperCase(), lp = val('p-license-prefix').toUpperCase();
+  $('pv-id').textContent  = id || '—';
+  $('pv-key').textContent = kp ? `${kp}-XXXX-XXXX-XXXX` : '—';
+  $('pv-lic').textContent = lp ? `${lp}.<payload>.<signature>` : '—';
+  $('pv-env').textContent = val('p-env-key') || '—';
+
+  // Report the same conflicts createProduct would reject, before submitting.
+  const el = $('p-avail');
+  el.className = 'genstatus';
+  if (!kp && !lp && !id) { el.textContent = ''; return; }
+  const problems = [];
+  if (id && !/^[a-z0-9][a-z0-9-]*$/.test(id)) problems.push('Product ID must be lowercase letters, digits and dashes.');
+  const idClash = productsCache.find((p) => p.id === id);
+  if (idClash) problems.push(`Product ID "${id}" already exists.`);
+  const kClash = productsCache.find((p) => (p.key_prefix || '').toUpperCase() === kp);
+  if (kp && kClash) problems.push(`Key prefix ${kp} is used by "${kClash.id}".`);
+  const lClash = productsCache.find((p) => (p.license_prefix || '').toUpperCase() === lp);
+  if (lp && lClash) problems.push(`License prefix ${lp} is used by "${lClash.id}".`);
+
+  if (problems.length) {
+    el.classList.add('bad');
+    el.textContent = '⚠ ' + problems.join(' ');
+  } else if (kp && lp && id) {
+    el.classList.add('ok');
+    el.textContent = `✓ ${kp} and ${lp} are available`;
+  } else {
+    el.textContent = '';
+  }
+}
+
+function toggleProductAdvanced() {
+  const box = $('p-advanced');
+  const chev = $('p-adv-chev');
+  const opening = box.classList.contains('hidden');
+  box.classList.toggle('hidden', !opening);
+  if (chev) chev.classList.toggle('open', opening);
+}
+
 function openProductModal() {
   ['p-id','p-name','p-key-prefix','p-license-prefix','p-env-key'].forEach(id => { const el = $(id); if (el) el.value = ''; });
+  _productFieldsEdited = false;
+  $('p-advanced').classList.add('hidden');
+  $('p-adv-chev').classList.remove('open');
+  renderProductPreview();
   $('p-err').classList.remove('show');
   show('product-modal');
 }
@@ -249,8 +361,16 @@ async function saveProduct() {
   };
   const err = $('p-err');
   err.classList.remove('show');
-  if (!body.id.trim() || !body.name.trim() || !body.key_prefix.trim() || !body.license_prefix.trim() || !body.env_key_name.trim()) {
-    err.textContent = 'All fields are required.'; err.classList.add('show'); return;
+  if (!body.name.trim()) {
+    err.textContent = 'Product name is required.'; err.classList.add('show'); return;
+  }
+  // The rest are normally generated from the name, so point at what to fix
+  // rather than naming fields that are collapsed under Advanced.
+  if (!body.id.trim() || !body.key_prefix.trim() || !body.license_prefix.trim() || !body.env_key_name.trim()) {
+    err.textContent = 'Could not derive all values from that name — open Advanced and fill them in.';
+    err.classList.add('show');
+    $('p-advanced').classList.remove('hidden');
+    return;
   }
   const res = await api('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!res.success) { err.textContent = res.error; err.classList.add('show'); return; }

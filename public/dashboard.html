@@ -107,6 +107,15 @@
     .pill.subscription { background:rgba(139,92,246,.14); color:#c4b5fd; }
     code.key { font-family:ui-monospace,'Cascadia Code',monospace; font-size:12px; color:#c7d2fe; }
     .pill.stale { background:rgba(239,68,68,.14); color:#fca5a5; }
+    .genbox { margin-top:14px; background:var(--panel2); border:1px solid var(--border2); border-radius:11px; padding:13px 15px; }
+    .genrow { display:flex; align-items:center; gap:12px; padding:4px 0; }
+    .genrow .k { color:var(--muted); font-size:12px; min-width:104px; }
+    .genstatus { margin-top:9px; font-size:12px; min-height:17px; }
+    .genstatus.ok { color:#86efac; }
+    .genstatus.bad { color:#fca5a5; }
+    .adv-toggle { margin-top:16px; background:none; border:none; color:var(--muted); font-size:12px;
+      font-weight:600; cursor:pointer; padding:4px 0; display:flex; align-items:center; gap:6px; }
+    .adv-toggle:hover { color:var(--text); }
     tr.expandable { cursor:pointer; }
     tr.expandable:hover { background:var(--panel2); }
     .chev { display:inline-block; width:14px; transition:transform .15s; color:var(--muted); }
@@ -397,14 +406,31 @@
         <button class="x" onclick="closeModal('product-modal')">✕</button>
       </div>
       <div class="drawer-body">
-        <label>Product ID *</label><input id="p-id" placeholder="e.g. verdix-inventory" autocomplete="off" />
-        <label>Name *</label><input id="p-name" placeholder="e.g. Verdix Inventory" />
-        <div class="row">
-          <div><label>Key Prefix *</label><input id="p-key-prefix" placeholder="MYAP" autocomplete="off" /></div>
-          <div><label>License Prefix *</label><input id="p-license-prefix" placeholder="MYAP1" autocomplete="off" /></div>
+        <label>Product Name *</label>
+        <input id="p-name" placeholder="e.g. Verdix Inventory" autocomplete="off" oninput="onProductNameInput()" />
+        <p class="muted" style="margin:6px 0 0;font-size:12px">Everything else is generated from this. You can adjust it under Advanced.</p>
+
+        <!-- Live preview of what the generated values actually produce. -->
+        <div class="genbox" id="p-preview">
+          <div class="genrow"><span class="k">Product ID</span><code class="key" id="pv-id">—</code></div>
+          <div class="genrow"><span class="k">Product keys</span><code class="key" id="pv-key">—</code></div>
+          <div class="genrow"><span class="k">License tokens</span><code class="key" id="pv-lic">—</code></div>
+          <div class="genrow"><span class="k">Env var</span><code class="key" id="pv-env">—</code></div>
+          <div class="genstatus" id="p-avail"></div>
         </div>
-        <label>Env Key Name *</label><input id="p-env-key" placeholder="LICENSE_PRIVATE_KEY_VERDIX_INVENTORY" autocomplete="off" />
-        <p class="muted" style="margin:10px 0 0;font-size:12px">The product key shown to customers starts with the <strong>key prefix</strong> (e.g. <code class="key">MYAP-7QK4-…</code>). The signed license token starts with the <strong>license prefix</strong>. The <strong>env key name</strong> is the environment variable holding this product's Ed25519 private key. Prefixes must be unique across products — <code class="key">VRDX</code>/<code class="key">VRDX1</code> are already used by verdix-pos.</p>
+
+        <button type="button" class="adv-toggle" id="p-adv-toggle" onclick="toggleProductAdvanced()">
+          <span class="chev" id="p-adv-chev">›</span> Advanced — edit generated values
+        </button>
+        <div id="p-advanced" class="hidden">
+          <label>Product ID *</label><input id="p-id" autocomplete="off" oninput="onProductFieldEdited()" />
+          <div class="row">
+            <div><label>Key Prefix *</label><input id="p-key-prefix" autocomplete="off" oninput="onProductFieldEdited()" /></div>
+            <div><label>License Prefix *</label><input id="p-license-prefix" autocomplete="off" oninput="onProductFieldEdited()" /></div>
+          </div>
+          <label>Env Key Name *</label><input id="p-env-key" autocomplete="off" oninput="onProductFieldEdited()" />
+          <p class="muted" style="margin:10px 0 0;font-size:12px">Customers see the <strong>key prefix</strong> (<code class="key">MYAP-7QK4-…</code>); signed tokens start with the <strong>license prefix</strong>. The <strong>env key name</strong> is the environment variable holding this product's private key — <code class="key">keygen</code> prints it back to you, so any name works as long as it is unique. Prefixes must be unique across products.</p>
+        </div>
         <div class="err" id="p-err"></div>
       </div>
       <div class="drawer-foot">
