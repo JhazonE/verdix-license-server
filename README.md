@@ -140,6 +140,10 @@ If `LICENSE_DB_*` is unset it uses `CLOUD_DB_*` (Railway), then `DB_*` (local).
    dashboard) into your own app yourself. Your app verifies with that key, its
    own product id, and its own `license_prefix`.
 
+   → **[App Integration Guide](docs/app-integration.md)** walks through this side
+   in full: which files to copy, the three values you must override (missing one
+   fails silently), activation, heartbeat, and a pre-ship checklist.
+
 4. **Deploy the private key** — set the env var named in your product's
    `env_key_name` column (e.g. `LICENSE_PRIVATE_KEY_MYAPP`) in Railway to the
    contents of `keys/my-app/private-key.pem`. Never commit it.
