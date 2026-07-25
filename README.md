@@ -33,16 +33,16 @@ forged even if the POS is decompiled.
 
 ```bash
 # 1. Generate the signing keys (once). Embeds the public key into the POS.
-npm run license:keygen
+npm run keygen
 
 # 2. Configure the database (see Environment below), then create tables.
-npm run license:migrate
+npm run migrate
 
 # 3. Create your admin login.
-npm run license:seed-admin -- --username admin --password "ChangeMe123"
+npm run seed-admin -- --username admin --password "ChangeMe123"
 
 # 4. Start the dashboard.
-npm run license:server      # → http://localhost:4100
+npm run server      # → http://localhost:4100
 ```
 
 ## Issuing a license (dashboard)
@@ -61,11 +61,11 @@ npm run license:server      # → http://localhost:4100
 
 ```bash
 # For an existing product key (records the activation)
-npm run license:new -- --product-key VRDX-XXXX-XXXX-XXXX --machine "ABCD-..."
+npm run new -- --product-key VRDX-XXXX-XXXX-XXXX --machine "ABCD-..."
 
 # Ad-hoc, no DB record (perpetual / subscription)
-npm run license:new -- --customer "Juan's Store" --machine "ABCD-..." --adhoc
-npm run license:new -- --customer "Acme" --machine "ABCD-..." --adhoc --days 365
+npm run new -- --customer "Juan's Store" --machine "ABCD-..." --adhoc
+npm run new -- --customer "Acme" --machine "ABCD-..." --adhoc --days 365
 ```
 
 ## Environment
@@ -100,9 +100,15 @@ If `LICENSE_DB_*` is unset it uses `CLOUD_DB_*` (Railway), then `DB_*` (local).
    precompile). Point it at a Railway MySQL service.
 2. Set env vars: `LICENSE_DB_*` (or `CLOUD_DB_*`), `LICENSE_ADMIN_SECRET`, and
    `LICENSE_PRIVATE_KEY` (paste the contents of `keys/private-key.pem`).
-3. `npm run license:migrate` + `npm run license:seed-admin` once against it.
+3. `npm run migrate` + `npm run seed-admin` once against it.
 
 ## Licensing a new product
+
+> **Tip:** the dashboard tracks these four steps per product. Open **Products**
+> and click a row to see which are done, copy the values each remaining step
+> needs, and mark step 3 once you've embedded the key. Step 3 is bound to the
+> key's fingerprint, so rotating the keypair flips it back to a red **Stale**
+> state instead of leaving a stale checkmark.
 
 1. **Register the product** — dashboard → Products → Add, or SQL:
 
@@ -140,6 +146,15 @@ If `LICENSE_DB_*` is unset it uses `CLOUD_DB_*` (Railway), then `DB_*` (local).
 
 Each product is cryptographically isolated: a license signed for one product
 fails verification against any other product's key.
+
+Two things the dashboard deliberately does **not** claim:
+
+- **Step 3 is your assertion, not a verification.** The server can't see your
+  app's repo. The fingerprint binding only guarantees the mark can't outlive the
+  key it was made for.
+- **Step 4 describes the server you're viewing.** A local dashboard reports
+  `local file only` even when Railway is configured correctly, which is why the
+  badge names the source instead of claiming the key is deployed.
 
 ## Security
 
