@@ -218,8 +218,11 @@ function renderProducts() {
   setCount('products-count', data.length, productsCache.length);
   if (!data.length) { el.innerHTML = '<div class="empty">No products match your search.</div>'; return; }
   el.innerHTML = `<table><thead><tr><th></th><th>Name</th><th>ID</th><th>Key Prefix</th><th>License Prefix</th><th>Env Var</th><th>Public Key</th><th>Setup</th></tr></thead><tbody>${
-    data.map((p) => `<tr class="expandable" onclick="toggleProductSetup('${esc(p.id)}')">
-      <td><span class="chev" id="chev-${esc(p.id)}">›</span></td>
+    data.map((p) => {
+      const expanded = expandedProducts.has(p.id);
+      const cached = setupCache[p.id];
+      return `<tr class="expandable" onclick="toggleProductSetup('${esc(p.id)}')">
+      <td><span class="chev${expanded ? ' open' : ''}" id="chev-${esc(p.id)}">›</span></td>
       <td><strong>${esc(p.name)}</strong></td>
       <td><code class="key">${esc(p.id)}</code></td>
       <td><code class="key">${esc(p.key_prefix)}</code></td>
@@ -228,9 +231,10 @@ function renderProducts() {
       <td>${p.public_key
         ? '<span class="pill active">present</span>'
         : '<span class="pill suspended">missing</span>'}</td>
-      <td id="setup-pill-${esc(p.id)}"><span class="muted" style="font-size:12px">—</span></td>
+      <td id="setup-pill-${esc(p.id)}">${cached ? setupPillHtml(cached.pill) : '<span class="muted" style="font-size:12px">—</span>'}</td>
     </tr>
-    <tr class="detail hidden" id="detail-${esc(p.id)}"><td colspan="8"><div id="setup-${esc(p.id)}"></div></td></tr>`).join('')
+    <tr class="detail${expanded ? '' : ' hidden'}" id="detail-${esc(p.id)}"><td colspan="8"><div id="setup-${esc(p.id)}">${expanded && cached ? renderSetupPanel(cached) : ''}</div></td></tr>`;
+    }).join('')
   }</tbody></table>`;
 }
 function openProductModal() {
@@ -260,6 +264,7 @@ async function saveProduct() {
 // state; embedding the public key happens in the product's own repo, so the
 // operator marks it and the mark is bound to the key's fingerprint.
 const setupCache = {};
+const expandedProducts = new Set();
 
 async function toggleProductSetup(id) {
   const row = $('detail-' + id);
@@ -268,10 +273,15 @@ async function toggleProductSetup(id) {
   const opening = row.classList.contains('hidden');
   row.classList.toggle('hidden', !opening);
   if (chev) chev.classList.toggle('open', opening);
+  if (opening) expandedProducts.add(id); else expandedProducts.delete(id);
   if (!opening) return;
 
   const panel = $('setup-' + id);
-  if (setupCache[id]) { panel.innerHTML = renderSetupPanel(setupCache[id]); return; }
+  if (setupCache[id]) {
+    panel.innerHTML = renderSetupPanel(setupCache[id]);
+    renderSetupPill(id, setupCache[id].pill);
+    return;
+  }
   panel.innerHTML = '<div class="setup"><span class="muted">Loading setup status…</span></div>';
   await loadProductSetup(id);
 }
@@ -287,16 +297,20 @@ async function loadProductSetup(id) {
   renderSetupPill(id, res.data.pill);
 }
 
-function renderSetupPill(id, pill) {
-  const cell = $('setup-pill-' + id);
-  if (!cell) return;
+function setupPillHtml(pill) {
   const map = {
     'ready':       ['active',    'Ready'],
     'needs-setup': ['suspended', 'Needs setup'],
     'stale':       ['stale',     'Stale'],
   };
   const [cls, label] = map[pill] || ['suspended', 'Unknown'];
-  cell.innerHTML = `<span class="pill ${cls}">${label}</span>`;
+  return `<span class="pill ${cls}">${label}</span>`;
+}
+
+function renderSetupPill(id, pill) {
+  const cell = $('setup-pill-' + id);
+  if (!cell) return;
+  cell.innerHTML = setupPillHtml(pill);
 }
 
 function copyBtn(text, label) {
