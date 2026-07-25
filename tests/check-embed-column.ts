@@ -32,15 +32,17 @@ async function main() {
   const original = before.embed_marked;
 
   const mark: EmbedMark = { at: '2026-07-25T10:00:00Z', by: 'test-runner', key_fp: 'abc123def456789a' };
-  await setProductEmbedMark(DEFAULT_PRODUCT_ID, mark);
-  const marked = await getProduct(DEFAULT_PRODUCT_ID);
-  check('mark round-trips', JSON.stringify(marked?.embed_marked) === JSON.stringify(mark));
+  try {
+    await setProductEmbedMark(DEFAULT_PRODUCT_ID, mark);
+    const marked = await getProduct(DEFAULT_PRODUCT_ID);
+    check('mark round-trips', JSON.stringify(marked?.embed_marked) === JSON.stringify(mark));
 
-  await setProductEmbedMark(DEFAULT_PRODUCT_ID, null);
-  const cleared = await getProduct(DEFAULT_PRODUCT_ID);
-  check('mark clears to null', cleared?.embed_marked == null);
-
-  await setProductEmbedMark(DEFAULT_PRODUCT_ID, original);
+    await setProductEmbedMark(DEFAULT_PRODUCT_ID, null);
+    const cleared = await getProduct(DEFAULT_PRODUCT_ID);
+    check('mark clears to null', cleared?.embed_marked == null);
+  } finally {
+    await setProductEmbedMark(DEFAULT_PRODUCT_ID, original);
+  }
 
   if (failures > 0) {
     console.error(`\nFAIL: ${failures} check(s) failed.`);

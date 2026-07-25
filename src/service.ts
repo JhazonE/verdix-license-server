@@ -557,14 +557,19 @@ export async function importBackup(
     // rather than deleted. Licenses below reference product_id, so this must
     // run first.
     for (const pr of products) {
+      // embed_marked must travel with public_key, not be left off the INSERT:
+      // the mark fingerprints the key it was asserted against, so restoring one
+      // without the other reunites a stale mark with a key it no longer matches
+      // (or resurrects a cleared mark on a fresh row). Don't "tidy" this back out.
       await query(
-        `INSERT INTO products (id, name, key_prefix, license_prefix, public_key, env_key_name, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO products (id, name, key_prefix, license_prefix, public_key, env_key_name, status, embed_marked, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
            name = VALUES(name), key_prefix = VALUES(key_prefix), license_prefix = VALUES(license_prefix),
-           public_key = VALUES(public_key), env_key_name = VALUES(env_key_name), status = VALUES(status)`,
+           public_key = VALUES(public_key), env_key_name = VALUES(env_key_name), status = VALUES(status),
+           embed_marked = VALUES(embed_marked)`,
         [pr.id, pr.name, pr.key_prefix, pr.license_prefix, pr.public_key ?? null,
-         pr.env_key_name, pr.status, pr.created_at]
+         pr.env_key_name, pr.status, pr.embed_marked ? JSON.stringify(pr.embed_marked) : null, pr.created_at]
       );
     }
 

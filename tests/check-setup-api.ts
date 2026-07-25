@@ -64,24 +64,29 @@ async function main() {
   check('no privateKey field', !/privateKey/i.test(raw));
 
   // ── POST /embed ignores a client-supplied fingerprint ─────────────────────
-  const forged = 'deadbeefdeadbeef';
-  await fetch(BASE + '/api/products/verdix-pos/embed', {
-    method: 'POST',
-    headers: auth,
-    // key_fp and by are attacker-controlled here; both must be ignored.
-    body: JSON.stringify({ marked: true, key_fp: forged, by: 'not-the-session-user' }),
-  });
-  const after = await (await fetch(BASE + '/api/products/verdix-pos/setup', { headers: auth })).json();
-  const mark = after.data?.steps?.embed;
-  check('body key_fp ignored', mark?.state === 'done' || mark?.state === 'stale');
-  check('marked by session user', mark?.by === USER);
-
-  // Clear the mark so the test leaves no trace.
-  await fetch(BASE + '/api/products/verdix-pos/embed', {
-    method: 'POST',
-    headers: auth,
-    body: JSON.stringify({ marked: false }),
-  });
+  // Wrapped in try/finally: if any assertion between the mark and the unmark
+  // throws, the unmark must still run so verdix-pos's embed_marked is left
+  // clear (this test mutates real production data).
+  try {
+    const forged = 'deadbeefdeadbeef';
+    await fetch(BASE + '/api/products/verdix-pos/embed', {
+      method: 'POST',
+      headers: auth,
+      // key_fp and by are attacker-controlled here; both must be ignored.
+      body: JSON.stringify({ marked: true, key_fp: forged, by: 'not-the-session-user' }),
+    });
+    const after = await (await fetch(BASE + '/api/products/verdix-pos/setup', { headers: auth })).json();
+    const mark = after.data?.steps?.embed;
+    check('body key_fp ignored', mark?.state === 'done' || mark?.state === 'stale');
+    check('marked by session user', mark?.by === USER);
+  } finally {
+    // Clear the mark so the test leaves no trace.
+    await fetch(BASE + '/api/products/verdix-pos/embed', {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({ marked: false }),
+    });
+  }
   const cleared = await (await fetch(BASE + '/api/products/verdix-pos/setup', { headers: auth })).json();
   check('unmark returns to pending', cleared.data?.steps?.embed?.state === 'pending');
 
