@@ -33,8 +33,9 @@ import {
   SessionPayload,
 } from './auth';
 import * as svc from './service';
-import { listProducts, createProduct } from './products';
-import { hasPrivateKey } from './keys';
+import { listProducts, createProduct, getProduct, setProductEmbedMark } from './products';
+import { hasPrivateKey, getPrivateKeySource } from './keys';
+import { publicKeyFingerprint, deriveEmbedState, deriveSetupPill } from './setup-status';
 
 dotenv.config();
 
@@ -289,6 +290,72 @@ async function handle(req: Req, res: Res) {
         } catch (e) {
           return sendJson(res, 400, { success: false, error: (e as Error).message });
         }
+      }
+
+      // GET /api/products/:id/setup — derived setup checklist state.
+      // Returns the PUBLIC key (developers need it to embed) and only a label
+      // for the private key. No private key material is ever serialized.
+      const setupMatch = p.match(/^\/api\/products\/([^/]+)\/setup$/);
+      if (method === 'GET' && setupMatch) {
+        const product = await getProduct(decodeURIComponent(setupMatch[1]));
+        if (!product) return sendJson(res, 404, { success: false, error: 'Product not found.' });
+
+        const source = getPrivateKeySource(product);
+        const embed = deriveEmbedState(product.public_key, product.embed_marked);
+        const hasKeypair = !!product.public_key;
+
+        return sendJson(res, 200, {
+          success: true,
+          data: {
+            productId: product.id,
+            licensePrefix: product.license_prefix,
+            keyPrefix: product.key_prefix,
+            envKeyName: product.env_key_name,
+            publicKey: product.public_key,
+            pill: deriveSetupPill({ hasKeypair, source, embed }),
+            steps: {
+              registered: { ok: true },
+              keypair: { ok: hasKeypair },
+              embed: {
+                state: embed,
+                at: product.embed_marked?.at ?? null,
+                by: product.embed_marked?.by ?? null,
+              },
+              signing: { ok: source !== 'none', source },
+            },
+          },
+        });
+      }
+
+      // POST /api/products/:id/embed — record or clear the operator's assertion
+      // that the public key was embedded in the product's app.
+      const embedMatch = p.match(/^\/api\/products\/([^/]+)\/embed$/);
+      if (method === 'POST' && embedMatch) {
+        const product = await getProduct(decodeURIComponent(embedMatch[1]));
+        if (!product) return sendJson(res, 404, { success: false, error: 'Product not found.' });
+
+        const body = await readBody(req);
+        if (body.marked === false) {
+          await setProductEmbedMark(product.id, null);
+          return sendJson(res, 200, { success: true });
+        }
+
+        if (!product.public_key) {
+          return sendJson(res, 400, {
+            success: false,
+            error: 'No public key yet — run keygen for this product first.',
+          });
+        }
+
+        // key_fp is computed HERE from the stored key, and `by` comes from the
+        // session. Accepting either from the request body would let any
+        // fingerprint be marked, defeating stale detection entirely.
+        await setProductEmbedMark(product.id, {
+          at: new Date().toISOString(),
+          by: session.username,
+          key_fp: publicKeyFingerprint(product.public_key),
+        });
+        return sendJson(res, 200, { success: true });
       }
 
       // Licenses
