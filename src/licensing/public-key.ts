@@ -5,9 +5,9 @@
  *
  * This is the public half of the key pair — it can ONLY verify signatures, not
  * create them, so it is safe to ship inside the POS. The matching PRIVATE key
- * lives exclusively in `license-generator/keys/private-key.pem` (gitignored)
- * and must never be distributed.
+ * lives exclusively on the license server (gitignored / env secret) and must
+ * never be distributed.
  */
 export const PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAltdNq16RLzrgNRX1O4u+WZSfW2iOEOFZnQyvr5vHuSw=
+MCowBQYDK2VwAyEA2dm0VFmJ8t1D3FKrejXY89kZJgL86sNiDNxi5NGKRyU=
 -----END PUBLIC KEY-----`;
