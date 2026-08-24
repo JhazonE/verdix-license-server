@@ -14,7 +14,7 @@ import {
   LICENSE_FORMAT_VERSION,
 } from './licensing/core';
 import { getPrivateKeyPem } from './keys';
-import { getProduct, DEFAULT_PRODUCT_ID } from './products';
+import { getProduct, listProducts, DEFAULT_PRODUCT_ID } from './products';
 import { sendWebhook } from './webhooks';
 import { query, withTransaction } from './db';
 import {
@@ -100,7 +100,19 @@ export async function createCustomer(input: {
       input.notes?.trim() || null,
     ]
   );
-  return getCustomer(id) as Promise<Customer>;
+  const created = (await getCustomer(id)) as Customer;
+
+  const products = await listProducts();
+  for (const product of products) {
+    if (product.webhook_url) {
+      sendWebhook(product, 'customer.created', {
+        customerId: id,
+        businessName: created.business_name,
+      });
+    }
+  }
+
+  return created;
 }
 
 export async function listCustomers(): Promise<(Customer & { license_count: number })[]> {
