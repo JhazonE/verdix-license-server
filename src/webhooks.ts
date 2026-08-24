@@ -91,22 +91,28 @@ export interface WebhookableProduct {
  * in the background after this function returns.
  */
 export function sendWebhook(product: WebhookableProduct, event: string, data: object): void {
-  if (!product.webhook_url || !product.webhook_secret) return;
+  try {
+    if (!product.webhook_url || !product.webhook_secret) return;
 
-  const rawBody = JSON.stringify({
-    event,
-    productId: product.id,
-    timestamp: new Date().toISOString(),
-    data,
-  });
-  const headers = {
-    'Content-Type': 'application/json',
-    'X-Webhook-Event': event,
-    'X-Webhook-Signature': computeSignature(product.webhook_secret, rawBody),
-  };
+    const rawBody = JSON.stringify({
+      event,
+      productId: product.id,
+      timestamp: new Date().toISOString(),
+      data,
+    });
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Webhook-Event': event,
+      'X-Webhook-Signature': computeSignature(product.webhook_secret, rawBody),
+    };
 
-  deliverWithRetry(product.id, product.webhook_url, event, rawBody, headers).catch(() => {
-    // deliverWithRetry already logs failures internally; this catch exists
-    // only to guarantee nothing here can produce an unhandled rejection.
-  });
+    deliverWithRetry(product.id, product.webhook_url, event, rawBody, headers).catch(() => {
+      // deliverWithRetry already logs failures internally; this catch exists
+      // only to guarantee nothing here can produce an unhandled rejection.
+    });
+  } catch {
+    // Building the request (e.g. JSON.stringify on circular/unsupported data)
+    // must never throw out into the caller — a webhook failure must never
+    // break the license operation that triggered it.
+  }
 }

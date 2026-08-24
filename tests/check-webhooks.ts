@@ -118,6 +118,20 @@ async function main() {
     check('no-op with null webhook_url does not throw', !threw);
   }
 
+  // 6. Circular-reference data (unserializable via JSON.stringify) must not throw
+  // synchronously out of sendWebhook — a webhook failure must never break the caller.
+  {
+    let threw = false;
+    const circular: Record<string, unknown> = { a: 1 };
+    circular.self = circular;
+    try {
+      sendWebhook({ id: 'p5', webhook_url: 'http://127.0.0.1:1/hook', webhook_secret: secret }, 'license.activated', circular);
+    } catch {
+      threw = true;
+    }
+    check('circular-reference data does not throw', !threw);
+  }
+
   if (failures > 0) {
     console.error(`\nFAIL: ${failures} check(s) failed.`);
     process.exit(1);
