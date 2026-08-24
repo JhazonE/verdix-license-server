@@ -36,6 +36,7 @@ import * as svc from './service';
 import { listProducts, createProduct, getProduct, setProductEmbedMark } from './products';
 import { hasPrivateKey, getPrivateKeySource, getKeyFileHint } from './keys';
 import { publicKeyFingerprint, deriveEmbedState, deriveSetupPill } from './setup-status';
+import { sendWebhook } from './webhooks';
 
 dotenv.config();
 
@@ -225,6 +226,16 @@ async function handle(req: Req, res: Res) {
       });
       await svc.log(license.id, payload.machineId, 'activate.online', 'Online activation', ip);
 
+      const activatedProduct = await getProduct(license.product_id);
+      if (activatedProduct) {
+        sendWebhook(activatedProduct, 'license.activated', {
+          licenseId: license.id,
+          machineId: payload.machineId,
+          customer: payload.customer,
+          edition: payload.edition,
+        });
+      }
+
       const cloudConfig = await cloudConfigFor(license);
       return sendJson(res, 200, {
         success: true,
@@ -250,11 +261,27 @@ async function handle(req: Req, res: Res) {
       if (!licenseId || !machineId)
         return sendJson(res, 400, { success: false, error: 'licenseId and machineId are required.' });
 
+      const licenseBefore = await svc.getLicense(licenseId);
+      const statusBefore = licenseBefore?.status;
+
       const result = await svc.validateHeartbeat(licenseId, machineId, {
         appVersion: body.appVersion,
         ip: clientIp(req),
       });
       const license = await svc.getLicense(licenseId);
+
+      if (license && result.status !== statusBefore) {
+        const product = await getProduct(license.product_id);
+        if (product) {
+          sendWebhook(product, 'license.status_changed', {
+            licenseId,
+            machineId,
+            oldStatus: statusBefore || null,
+            newStatus: result.status,
+          });
+        }
+      }
+
       const cloudConfig =
         result.status === 'active' && license ? await cloudConfigFor(license) : undefined;
       return sendJson(res, 200, { success: true, ...result, ...(cloudConfig ? { cloudConfig } : {}) });
