@@ -10,6 +10,9 @@ let editUserId = null;
 let pwResetUserId = null;
 let _pendingRestoreFile = null;
 let _confirmCallback = null;
+// Secrets just rotated in this browser session, shown once in a copyable box
+// (see regenerateProductWebhookSecret) rather than only in a dismissible toast.
+let revealedWebhookSecrets = {};
 
 function matchesQuery(obj, fields, q) {
   if (!q) return true;
@@ -529,13 +532,14 @@ function renderSetupPanel(d) {
     <span class="mark ${d.webhookUrl ? 'ok' : 'todo'}">${d.webhookUrl ? '✓' : '→'}</span>
     <div style="flex:1">
       <h4>Webhook</h4>
-      <div class="note">POST license events to your own system. <a href="docs/app-integration.md" target="_blank">See event list</a>.</div>
+      <div class="note">POST license events to your own system: license.activated, license.status_changed, license.issued, license.revoked, license.reactivated, customer.created. See the app integration guide for payload format.</div>
       <div style="display:flex;gap:8px;margin-top:8px">
         <input id="webhook-url-${esc(d.productId)}" type="text" placeholder="https://your-system.example/webhook"
                value="${esc(d.webhookUrl || '')}" style="flex:1" onclick="event.stopPropagation()">
         <button class="btn ghost sm" onclick="event.stopPropagation();saveProductWebhook('${esc(d.productId)}')">save</button>
       </div>
       ${d.hasWebhookSecret ? `<div style="margin-top:8px"><span class="muted" style="font-size:12px">Secret configured.</span> <button class="btn ghost sm" onclick="event.stopPropagation();regenerateProductWebhookSecret('${esc(d.productId)}')">regenerate secret</button></div>` : ''}
+      ${revealedWebhookSecrets[d.productId] ? `<div class="copyrow" style="margin-top:8px"><span class="lbl">new secret (shown once)</span><code class="key">${esc(revealedWebhookSecrets[d.productId])}</code>${copyBtn(revealedWebhookSecrets[d.productId], 'Webhook secret')}</div>` : ''}
     </div>
   </div>`;
 
@@ -572,7 +576,11 @@ async function regenerateProductWebhookSecret(id) {
     body: JSON.stringify({ regenerateSecret: true }),
   });
   if (!res.success) { toast(res.error, 'error'); return; }
-  toast('New secret: ' + res.data.webhook_secret, 'success', 'Webhook Secret Rotated');
+  // Shown once in a copyable box in the panel (see renderSetupPanel) — the
+  // secret can't be retrieved again after this, so a toast alone (not
+  // copyable, may auto-dismiss) isn't good enough for it.
+  revealedWebhookSecrets[id] = res.data.webhook_secret;
+  toast('Webhook secret rotated. Copy it now — it will not be shown again.', 'success', 'Webhook Secret Rotated');
   delete setupCache[id];
   await loadProductSetup(id);
 }

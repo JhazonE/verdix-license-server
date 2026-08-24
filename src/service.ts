@@ -102,14 +102,21 @@ export async function createCustomer(input: {
   );
   const created = (await getCustomer(id)) as Customer;
 
-  const products = await listProducts();
-  for (const product of products) {
-    if (product.webhook_url) {
-      sendWebhook(product, 'customer.created', {
-        customerId: id,
-        businessName: created.business_name,
-      });
+  // The customer row is already committed above — a failure fanning out
+  // webhooks (including listProducts() itself erroring) must never surface
+  // as a failure of customer creation, which actually succeeded.
+  try {
+    const products = await listProducts();
+    for (const product of products) {
+      if (product.webhook_url) {
+        sendWebhook(product, 'customer.created', {
+          customerId: id,
+          businessName: created.business_name,
+        });
+      }
     }
+  } catch (e) {
+    console.error('[webhooks] customer.created fan-out failed:', (e as Error).message);
   }
 
   return created;
@@ -473,6 +480,26 @@ export type HeartbeatStatus =
   | 'released'
   | 'expired'
   | 'invalid';
+
+// Statuses actually persisted in licenses.status. 'expired'/'released'/'invalid'
+// are derived at read-time inside validateHeartbeat and are never written back
+// to the row, so they must never be compared against a previously-read stored
+// status — that comparison would differ (and fire) on every single heartbeat.
+const STORED_LICENSE_STATUSES: ReadonlySet<string> = new Set(['active', 'suspended', 'revoked']);
+
+/**
+ * Decide whether a heartbeat-observed status should fire `license.status_changed`.
+ * Only fires for a genuine transition between STORED statuses (active/suspended/
+ * revoked) — never for the derived 'expired'/'released'/'invalid' heartbeat
+ * statuses, which would otherwise spam the webhook on every poll since they're
+ * never reflected in the stored `statusBefore` value.
+ */
+export function shouldFireStatusChanged(
+  statusBefore: LicenseStatus | undefined | null,
+  newStatus: HeartbeatStatus
+): boolean {
+  return STORED_LICENSE_STATUSES.has(newStatus) && newStatus !== statusBefore;
+}
 
 export interface HeartbeatResult {
   status: HeartbeatStatus;

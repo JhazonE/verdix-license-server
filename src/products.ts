@@ -108,6 +108,17 @@ function generateWebhookSecret(): string {
  */
 export async function setProductWebhook(id: string, url: string | null): Promise<Product> {
   const trimmed = url?.trim() || null;
+  if (trimmed) {
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      throw new Error('webhook_url must be a valid http(s) URL.');
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('webhook_url must be a valid http(s) URL.');
+    }
+  }
   const current = await getProduct(id);
   if (!current) throw new Error(`Unknown product "${id}".`);
 

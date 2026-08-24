@@ -1,6 +1,7 @@
 import http from 'http';
 import crypto from 'crypto';
 import { sendWebhook, computeSignature } from '../src/webhooks';
+import { shouldFireStatusChanged } from '../src/service';
 
 function startMockServer(handler: (req: http.IncomingMessage, res: http.ServerResponse, body: string) => void): Promise<{ url: string; close: () => Promise<void> }> {
   return new Promise((resolve) => {
@@ -130,6 +131,73 @@ async function main() {
       threw = true;
     }
     check('circular-reference data does not throw', !threw);
+  }
+
+  // 7. Regression for the /api/validate call-site logic: license.status_changed
+  // must fire only for genuine transitions between STORED statuses
+  // (active/suspended/revoked), and must NOT fire for 'expired'/'released'/
+  // 'invalid' — those are derived at read-time inside validateHeartbeat and
+  // are never persisted to licenses.status, so statusBefore (read from the DB)
+  // would differ from them on EVERY heartbeat forever, spamming the webhook
+  // instead of firing once on a real transition.
+  //
+  // This directly exercises src/service.ts's shouldFireStatusChanged(), which
+  // is the exact predicate src/server.ts's /api/validate handler calls — so a
+  // regression here would have caught the bug at the real call site, not just
+  // in an isolated reimplementation of the logic.
+  {
+    // An expired license: statusBefore is always 'active' (the DB never
+    // stores 'expired'), and validateHeartbeat keeps reporting 'expired' on
+    // every single poll. The OLD buggy comparison (`newStatus !== statusBefore`)
+    // fires every time. The fix must not fire at all for this case.
+    check(
+      'expired: first heartbeat does not fire (not a stored-status transition)',
+      shouldFireStatusChanged('active', 'expired') === false
+    );
+    check(
+      'expired: second/subsequent heartbeat still does not fire (no repeat spam)',
+      shouldFireStatusChanged('active', 'expired') === false
+    );
+
+    // A released activation: same shape of bug — 'released' is derived, never stored.
+    check(
+      'released: does not fire (not a stored-status transition)',
+      shouldFireStatusChanged('active', 'released') === false
+    );
+
+    // An unknown/invalid license id.
+    check(
+      'invalid: does not fire',
+      shouldFireStatusChanged('active', 'invalid') === false
+    );
+
+    // Genuine stored-status transitions must still fire.
+    check(
+      'active -> revoked fires (genuine stored transition)',
+      shouldFireStatusChanged('active', 'revoked') === true
+    );
+    check(
+      'active -> suspended fires (genuine stored transition)',
+      shouldFireStatusChanged('active', 'suspended') === true
+    );
+    check(
+      'suspended -> active fires (reactivation observed via heartbeat)',
+      shouldFireStatusChanged('suspended', 'active') === true
+    );
+    check(
+      'revoked -> active fires (reactivation observed via heartbeat)',
+      shouldFireStatusChanged('revoked', 'active') === true
+    );
+
+    // No change at all must never fire.
+    check(
+      'active -> active does not fire (no change)',
+      shouldFireStatusChanged('active', 'active') === false
+    );
+    check(
+      'revoked -> revoked does not fire (no change)',
+      shouldFireStatusChanged('revoked', 'revoked') === false
+    );
   }
 
   if (failures > 0) {

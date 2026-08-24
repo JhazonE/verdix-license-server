@@ -237,9 +237,9 @@ URL in the dashboard.
 The server fires webhooks for these six events:
 
 | Event                     | Trigger                                                          | Data payload |
-|---------------------------|------|------------|
+|---------------------------|-------------------------------------------------------------------|--------------|
 | `license.activated`       | `POST /api/activate` succeeds (new signed issuance) | `{ licenseId, machineId, customer, edition }` |
-| `license.status_changed`  | `POST /api/validate` returns a status different from before (e.g. flips to `revoked`, `suspended`, or `expired`) | `{ licenseId, machineId, oldStatus, newStatus }` |
+| `license.status_changed`  | `POST /api/validate` observes a change to the *stored* license status (`active` ⇄ `suspended`/`revoked`) | `{ licenseId, machineId, oldStatus, newStatus }` |
 | `license.issued`          | Dashboard "Issue License" (`POST /api/licenses`) | `{ licenseId, customerId, productKey, edition }` |
 | `license.revoked`         | Dashboard sets status to `revoked` (`POST /api/licenses/:id/status`) | `{ licenseId, oldStatus, newStatus }` |
 | `license.reactivated`     | Dashboard sets status to `active` from a non-active state | `{ licenseId, oldStatus, newStatus }` |

@@ -268,9 +268,13 @@ async function handle(req: Req, res: Res) {
         appVersion: body.appVersion,
         ip: clientIp(req),
       });
-      const license = await svc.getLicense(licenseId);
+      // Reuse licenseBefore instead of re-reading: product_id never changes as
+      // a side effect of a heartbeat, so the row fetched above is still valid
+      // for looking up the webhook target. This drops one of the three
+      // getLicense calls this handler used to make per request.
+      const license = licenseBefore;
 
-      if (license && result.status !== statusBefore) {
+      if (license && svc.shouldFireStatusChanged(statusBefore, result.status)) {
         const product = await getProduct(license.product_id);
         if (product) {
           sendWebhook(product, 'license.status_changed', {
@@ -320,7 +324,13 @@ async function handle(req: Req, res: Res) {
 
       // Products
       if (method === 'GET' && p === '/api/products') {
-        return sendJson(res, 200, { success: true, data: await listProducts() });
+        // webhook_secret must never reach the browser (see Product.webhook_secret's
+        // doc comment) — strip it here rather than in listProducts(), since
+        // service.ts's customer.created fan-out still needs the real secret
+        // from listProducts() to call sendWebhook.
+        const products = await listProducts();
+        const sanitized = products.map(({ webhook_secret, ...rest }) => rest);
+        return sendJson(res, 200, { success: true, data: sanitized });
       }
       if (method === 'POST' && p === '/api/products') {
         const body = await readBody(req);

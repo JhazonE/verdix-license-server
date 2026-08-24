@@ -35,6 +35,28 @@ async function main() {
     const rotated = await regenerateWebhookSecret(DEFAULT_PRODUCT_ID);
     check('regenerateWebhookSecret changes the secret', rotated.webhook_secret !== secretAfterFirstSet);
     check('regenerateWebhookSecret keeps a 64-char hex secret', rotated.webhook_secret!.length === 64);
+
+    // Invalid URLs must be rejected at save time rather than failing silently
+    // at delivery time after burning all retry attempts.
+    let rejectedNotAUrl = false;
+    try {
+      await setProductWebhook(DEFAULT_PRODUCT_ID, 'not-a-url');
+    } catch {
+      rejectedNotAUrl = true;
+    }
+    check('setProductWebhook rejects a malformed URL', rejectedNotAUrl);
+
+    let rejectedBadScheme = false;
+    try {
+      await setProductWebhook(DEFAULT_PRODUCT_ID, 'ftp://example.com/hook');
+    } catch {
+      rejectedBadScheme = true;
+    }
+    check('setProductWebhook rejects a non-http(s) scheme', rejectedBadScheme);
+
+    // http:// (not just https://) must still be accepted, for local/dev testing.
+    const httpSet = await setProductWebhook(DEFAULT_PRODUCT_ID, 'http://localhost:4100/hook');
+    check('setProductWebhook accepts plain http:// URLs', httpSet.webhook_url === 'http://localhost:4100/hook');
   } finally {
     await query_restore(originalUrl, originalSecret);
   }
