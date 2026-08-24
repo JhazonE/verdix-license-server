@@ -149,6 +149,19 @@ const COLUMNS: { table: string; column: string; sql: string }[] = [
     // mark to the key it was made for, so a rotation invalidates it.
     sql: `ALTER TABLE products ADD COLUMN embed_marked JSON NULL`,
   },
+  {
+    table: 'products',
+    column: 'webhook_url',
+    // Destination for outbound license-event notifications. NULL = disabled.
+    sql: `ALTER TABLE products ADD COLUMN webhook_url VARCHAR(500) NULL`,
+  },
+  {
+    table: 'products',
+    column: 'webhook_secret',
+    // HMAC key used to sign webhook bodies. Generated server-side, never
+    // accepted from client input (see products.ts setProductWebhook).
+    sql: `ALTER TABLE products ADD COLUMN webhook_secret VARCHAR(64) NULL`,
+  },
 ];
 
 async function applyColumns(): Promise<void> {
