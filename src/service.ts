@@ -15,6 +15,7 @@ import {
 } from './licensing/core';
 import { getPrivateKeyPem } from './keys';
 import { getProduct, DEFAULT_PRODUCT_ID } from './products';
+import { sendWebhook } from './webhooks';
 import { query, withTransaction } from './db';
 import {
   getCachedLicense,
@@ -174,6 +175,12 @@ export async function createLicense(input: {
   );
 
   await log(id, null, 'license.created', `Product key ${productKey} issued`);
+  sendWebhook(product, 'license.issued', {
+    licenseId: id,
+    customerId: input.customer_id,
+    productKey,
+    edition: (input.edition || 'standard').trim(),
+  });
   const created = await getLicense(id) as License;
   if (created) cachePutLicense(created as unknown as CachedLicense);
   return created;
@@ -234,9 +241,24 @@ export async function listLicenses(): Promise<any[]> {
 }
 
 export async function setLicenseStatus(id: string, status: LicenseStatus): Promise<void> {
+  const before = await getLicense(id);
   await query(`UPDATE licenses SET status = ? WHERE id = ?`, [status, id]);
   cacheUpdateLicenseStatus(id, status);
   await log(id, null, 'license.' + status, `Status set to ${status}`);
+
+  if (before && before.status !== status) {
+    const product = await getProduct(before.product_id);
+    if (product) {
+      const event = status === 'revoked' ? 'license.revoked' : status === 'active' ? 'license.reactivated' : null;
+      if (event) {
+        sendWebhook(product, event, {
+          licenseId: id,
+          oldStatus: before.status,
+          newStatus: status,
+        });
+      }
+    }
+  }
 }
 
 export async function addLicenseFeature(licenseId: string, feature: string): Promise<void> {
