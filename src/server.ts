@@ -33,7 +33,7 @@ import {
   SessionPayload,
 } from './auth';
 import * as svc from './service';
-import { listProducts, createProduct, getProduct, setProductEmbedMark } from './products';
+import { listProducts, createProduct, getProduct, setProductEmbedMark, setProductWebhook, regenerateWebhookSecret } from './products';
 import { hasPrivateKey, getPrivateKeySource, getKeyFileHint } from './keys';
 import { publicKeyFingerprint, deriveEmbedState, deriveSetupPill } from './setup-status';
 import { sendWebhook } from './webhooks';
@@ -403,6 +403,37 @@ async function handle(req: Req, res: Res) {
           key_fp: publicKeyFingerprint(product.public_key),
         });
         return sendJson(res, 200, { success: true });
+      }
+
+      // POST /api/products/:id/webhook — set/clear the webhook URL, or rotate the secret.
+      const webhookMatch = p.match(/^\/api\/products\/([^/]+)\/webhook$/);
+      if (method === 'POST' && webhookMatch) {
+        const id = decodeSegment(webhookMatch[1]);
+        if (!id) return sendJson(res, 404, { success: false, error: 'Product not found.' });
+        const product = await getProduct(id);
+        if (!product) return sendJson(res, 404, { success: false, error: 'Product not found.' });
+
+        const body = await readBody(req);
+        const hasUrlField = Object.prototype.hasOwnProperty.call(body, 'url');
+        const wantsRegenerate = body.regenerateSecret === true;
+        if (hasUrlField === wantsRegenerate) {
+          return sendJson(res, 400, {
+            success: false,
+            error: 'Provide exactly one of "url" or "regenerateSecret": true.',
+          });
+        }
+
+        try {
+          const updated = wantsRegenerate
+            ? await regenerateWebhookSecret(id)
+            : await setProductWebhook(id, body.url === null ? null : String(body.url || ''));
+          return sendJson(res, 200, {
+            success: true,
+            data: { webhook_url: updated.webhook_url, webhook_secret: updated.webhook_secret },
+          });
+        } catch (e) {
+          return sendJson(res, 400, { success: false, error: (e as Error).message });
+        }
       }
 
       // Licenses
