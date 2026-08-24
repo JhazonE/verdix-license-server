@@ -3,6 +3,7 @@
  * keypair (resolved through env_key_name), so a leaked key is confined to one
  * product.
  */
+import crypto from 'crypto';
 import { query } from './db';
 import type { EmbedMark } from './setup-status';
 
@@ -18,6 +19,10 @@ export interface Product {
   status: 'active' | 'inactive';
   /** Operator's embed mark, or null when never marked. See setup-status.ts. */
   embed_marked: EmbedMark | null;
+  /** Destination for outbound license-event webhooks, or null when disabled. */
+  webhook_url: string | null;
+  /** HMAC-SHA256 key for signing webhook bodies. Never sent to clients. */
+  webhook_secret: string | null;
 }
 
 export async function getProduct(id: string): Promise<Product | null> {
@@ -90,4 +95,47 @@ export async function setProductEmbedMark(id: string, mark: EmbedMark | null): P
     mark ? JSON.stringify(mark) : null,
     id.trim(),
   ]);
+}
+
+function generateWebhookSecret(): string {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+/**
+ * Set or clear a product's webhook URL. Generates a secret on first use;
+ * clearing the URL leaves any existing secret in place so re-enabling later
+ * doesn't silently rotate it out from under an already-configured receiver.
+ */
+export async function setProductWebhook(id: string, url: string | null): Promise<Product> {
+  const trimmed = url?.trim() || null;
+  const current = await getProduct(id);
+  if (!current) throw new Error(`Unknown product "${id}".`);
+
+  const needsSecret = trimmed && !current.webhook_secret;
+  if (needsSecret) {
+    await query(`UPDATE products SET webhook_url = ?, webhook_secret = ? WHERE id = ?`, [
+      trimmed,
+      generateWebhookSecret(),
+      id.trim(),
+    ]);
+  } else {
+    await query(`UPDATE products SET webhook_url = ? WHERE id = ?`, [trimmed, id.trim()]);
+  }
+
+  const updated = await getProduct(id);
+  if (!updated) throw new Error(`Product "${id}" disappeared during update.`);
+  return updated;
+}
+
+/** Rotate the HMAC secret. Signatures made with the old secret stop verifying. */
+export async function regenerateWebhookSecret(id: string): Promise<Product> {
+  const current = await getProduct(id);
+  if (!current) throw new Error(`Unknown product "${id}".`);
+  await query(`UPDATE products SET webhook_secret = ? WHERE id = ?`, [
+    generateWebhookSecret(),
+    id.trim(),
+  ]);
+  const updated = await getProduct(id);
+  if (!updated) throw new Error(`Product "${id}" disappeared during update.`);
+  return updated;
 }
