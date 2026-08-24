@@ -225,6 +225,116 @@ so an offline app remains correctly bounded.
 
 ---
 
+## Step 7 — Respond to webhooks (optional, online only)
+
+When a license event occurs, the server can POST a signed JSON payload to a
+per-product webhook URL, so your backend can react to activations, revocations,
+or other events. This is optional — webhooks are only sent if you configure a
+URL in the dashboard.
+
+### Events
+
+The server fires webhooks for these six events:
+
+| Event                     | Trigger                                                          | Data payload |
+|---------------------------|------|------------|
+| `license.activated`       | `POST /api/activate` succeeds (new signed issuance) | `{ licenseId, machineId, customer, edition }` |
+| `license.status_changed`  | `POST /api/validate` returns a status different from before (e.g. flips to `revoked`, `suspended`, or `expired`) | `{ licenseId, machineId, oldStatus, newStatus }` |
+| `license.issued`          | Dashboard "Issue License" (`POST /api/licenses`) | `{ licenseId, customerId, productKey, edition }` |
+| `license.revoked`         | Dashboard sets status to `revoked` (`POST /api/licenses/:id/status`) | `{ licenseId, oldStatus, newStatus }` |
+| `license.reactivated`     | Dashboard sets status to `active` from a non-active state | `{ licenseId, oldStatus, newStatus }` |
+| `customer.created`        | `POST /api/customers` | `{ customerId, businessName }` |
+
+Heartbeat polls that report *no* status change do not fire a webhook — this
+avoids spam on every heartbeat interval while still catching actual changes.
+
+### Webhook payload format
+
+Every webhook POST receives a JSON body with this shape:
+
+```json
+{
+  "event": "license.activated",
+  "productId": "my-app",
+  "timestamp": "2026-08-24T10:30:45.123Z",
+  "data": { "licenseId": "...", "machineId": "...", ... }
+}
+```
+
+The `data` object is event-specific (see the table above). The `timestamp` is
+ISO 8601 UTC.
+
+### Verifying the signature
+
+Every webhook includes two headers to verify its authenticity:
+
+- `X-Webhook-Event`: the event name (redundant with the body, useful for filtering)
+- `X-Webhook-Signature`: `sha256=<hmac-sha256-hex>`, the HMAC of the **raw
+  request body** (the exact bytes sent, not re-encoded JSON) using the product's
+  secret.
+
+In Node.js, verify it like this:
+
+```ts
+import crypto from 'crypto';
+
+function verifyWebhookSignature(
+  rawBody: string,   // the exact bytes received, before parsing JSON
+  signature: string, // value of X-Webhook-Signature header
+  secret: string     // the product's webhook secret
+): boolean {
+  const computed = 'sha256=' + crypto.createHmac('sha256', secret)
+    .update(rawBody)
+    .digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(signature));
+}
+```
+
+Call this in your handler **before** trusting the payload:
+
+```ts
+if (!verifyWebhookSignature(rawBody, req.headers['x-webhook-signature'] as string, process.env.WEBHOOK_SECRET!)) {
+  return res.status(401).send('Signature mismatch');
+}
+
+const payload = JSON.parse(rawBody);
+// ... react to the event ...
+```
+
+### Configuration
+
+To enable webhooks for your product:
+
+1. In the dashboard, go to **Products** and expand your product row.
+2. Under step 3, find the **Webhook URL** field and enter your HTTPS endpoint.
+3. Click **Save**. The server generates a random 32-byte hex secret and displays
+   it once in a copyable box (like a newly-issued API key).
+4. Copy that secret into your environment variables.
+
+To rotate the secret later (e.g. if you suspect compromise), click **Regenerate
+Secret**. The old secret stops working immediately; any earlier signatures
+become invalid.
+
+### Delivery and retries
+
+- **Fire-and-forget**: webhook delivery never blocks or fails the license operation
+  that triggered it (activation, heartbeat, etc.). Delivery happens in the
+  background.
+- **Retries**: the server attempts delivery up to 3 times total, with a fixed
+  backoff of 1 second before attempt 2 and 5 seconds before attempt 3.
+- **Timeout**: each attempt has a 5-second request timeout.
+- **Failure**: on final failure after all retries, the server logs the error
+  server-side (via `activation_logs` / `webhook.fail` action) with the event
+  name, URL host, and error message, then stops.
+
+> **Important: assume idempotency.** A webhook may be delivered more than once
+> if an earlier attempt succeeded but its response was lost before the server
+> saw it. Your receiver should either be idempotent (safe to process the same
+> event twice) or track `{ event, productId, timestamp, data }` tuples you've
+> already seen.
+
+---
+
 ## Caveats — read before shipping
 
 ### The machine fingerprint is Windows-only
