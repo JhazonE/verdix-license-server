@@ -368,6 +368,8 @@ async function handle(req: Req, res: Res) {
               },
               signing: { ok: source !== 'none', source },
             },
+            webhookUrl: product.webhook_url,
+            hasWebhookSecret: !!product.webhook_secret,
           },
         });
       }

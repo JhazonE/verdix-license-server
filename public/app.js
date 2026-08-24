@@ -522,7 +522,24 @@ function renderSetupPanel(d) {
       <div class="note">Set it to the contents of <code class="key">${esc(keyFile)}</code>. Never commit it.</div></div>
   </div>`;
 
-  return `<div class="setup">${step1}${step2}${step3}${step4}</div>`;
+  // Step 5 — optional. Not part of the deploy-readiness pill; a product is
+  // "ready" without a webhook configured, so this is styled as a separate
+  // section rather than a numbered step with a pass/fail mark.
+  const webhookSection = `<div class="setup-step" style="border-top:1px solid var(--border,#333);margin-top:12px;padding-top:12px">
+    <span class="mark ${d.webhookUrl ? 'ok' : 'todo'}">${d.webhookUrl ? '✓' : '→'}</span>
+    <div style="flex:1">
+      <h4>Webhook</h4>
+      <div class="note">POST license events to your own system. <a href="docs/app-integration.md" target="_blank">See event list</a>.</div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <input id="webhook-url-${esc(d.productId)}" type="text" placeholder="https://your-system.example/webhook"
+               value="${esc(d.webhookUrl || '')}" style="flex:1" onclick="event.stopPropagation()">
+        <button class="btn ghost sm" onclick="event.stopPropagation();saveProductWebhook('${esc(d.productId)}')">save</button>
+      </div>
+      ${d.hasWebhookSecret ? `<div style="margin-top:8px"><span class="muted" style="font-size:12px">Secret configured.</span> <button class="btn ghost sm" onclick="event.stopPropagation();regenerateProductWebhookSecret('${esc(d.productId)}')">regenerate secret</button></div>` : ''}
+    </div>
+  </div>`;
+
+  return `<div class="setup">${step1}${step2}${step3}${step4}${webhookSection}</div>`;
 }
 
 async function markEmbedded(id, marked) {
@@ -535,6 +552,29 @@ async function markEmbedded(id, marked) {
   delete setupCache[id];
   await loadProductSetup(id);
   toast(marked ? 'Marked as embedded.' : 'Mark cleared.', 'success');
+}
+
+async function saveProductWebhook(id) {
+  const url = val('webhook-url-' + id);
+  const res = await api('/api/products/' + encodeURIComponent(id) + '/webhook', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: url.trim() || null }),
+  });
+  if (!res.success) { toast(res.error, 'error'); return; }
+  toast(res.data.webhook_url ? 'Webhook saved.' : 'Webhook cleared.', 'success');
+  delete setupCache[id];
+  await loadProductSetup(id);
+}
+
+async function regenerateProductWebhookSecret(id) {
+  const res = await api('/api/products/' + encodeURIComponent(id) + '/webhook', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ regenerateSecret: true }),
+  });
+  if (!res.success) { toast(res.error, 'error'); return; }
+  toast('New secret: ' + res.data.webhook_secret, 'success', 'Webhook Secret Rotated');
+  delete setupCache[id];
+  await loadProductSetup(id);
 }
 
 // ── Licenses ──────────────────────────────────────────────────────────────────
