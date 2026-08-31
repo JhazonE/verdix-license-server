@@ -267,6 +267,8 @@ async function handle(req: Req, res: Res) {
       const result = await svc.validateHeartbeat(licenseId, machineId, {
         appVersion: body.appVersion,
         ip: clientIp(req),
+        terminalCount:
+          typeof body.terminalCount === 'number' ? body.terminalCount : undefined,
       });
       // Reuse licenseBefore instead of re-reading: product_id never changes as
       // a side effect of a heartbeat, so the row fetched above is still valid

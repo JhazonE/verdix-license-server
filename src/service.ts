@@ -479,12 +479,16 @@ export type HeartbeatStatus =
   | 'suspended'
   | 'released'
   | 'expired'
-  | 'invalid';
+  | 'invalid'
+  | 'seat-exceeded';
 
-// Statuses actually persisted in licenses.status. 'expired'/'released'/'invalid'
-// are derived at read-time inside validateHeartbeat and are never written back
-// to the row, so they must never be compared against a previously-read stored
-// status — that comparison would differ (and fire) on every single heartbeat.
+// Statuses actually persisted in licenses.status. 'expired'/'released'/'invalid'/
+// 'seat-exceeded' are derived at read-time inside validateHeartbeat and are never
+// written back to the row, so they must never be compared against a previously-read
+// stored status — that comparison would differ (and fire) on every single heartbeat.
+// 'seat-exceeded' in particular is a transient per-heartbeat report (cloud terminal
+// count vs. seat limit), not a stored license status — it must never fire
+// license.status_changed on every poll.
 const STORED_LICENSE_STATUSES: ReadonlySet<string> = new Set(['active', 'suspended', 'revoked']);
 
 /**
@@ -505,6 +509,7 @@ export interface HeartbeatResult {
   status: HeartbeatStatus;
   signedLicense?: string;
   expires?: string | null;
+  seatLimit?: number | null;
 }
 
 /**
@@ -515,7 +520,7 @@ export interface HeartbeatResult {
 export async function validateHeartbeat(
   licenseId: string,
   machineId: string,
-  opts: { appVersion?: string; ip?: string } = {}
+  opts: { appVersion?: string; ip?: string; terminalCount?: number } = {}
 ): Promise<HeartbeatResult> {
   const license = await getLicense(licenseId);
   if (!license) return { status: 'invalid' };
@@ -533,9 +538,19 @@ export async function validateHeartbeat(
     return { status: 'expired', expires };
   }
 
+  const seatLimit = license.max_activations ?? null;
+
+  // Cloud seat check: every hosted terminal shares one activation, so seats are
+  // counted from the POS-reported terminal total instead. Report the overage —
+  // never withhold the license, which would lock a paying store out of checkout.
+  if (opts.terminalCount !== undefined && seatLimit !== null && opts.terminalCount > seatLimit) {
+    const { signedLicense } = await issueSignedLicense(license, machineId, { record: false });
+    return { status: 'seat-exceeded', signedLicense, expires, seatLimit };
+  }
+
   // Still valid — re-sign (propagates renewed expiry/features) without adding a row.
   const { signedLicense } = await issueSignedLicense(license, machineId, { record: false });
-  return { status: 'active', signedLicense, expires };
+  return { status: 'active', signedLicense, expires, seatLimit };
 }
 
 export async function releaseActivation(activationId: string): Promise<void> {
