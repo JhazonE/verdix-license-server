@@ -43,10 +43,38 @@ export async function provisionCloudDatabase(
   productKey: string,
   opts: { rotatePassword?: boolean } = {}
 ): Promise<ProvisionResult> {
+  // Validate the admin connection settings up front. An unresolved Railway
+  // variable reference (e.g. CLOUD_PROVISION_PORT left as the literal text
+  // "${{MySQL.MYSQLPORT}}" because the service is not named MySQL) otherwise
+  // reaches mysqldump as NaN and surfaces as the opaque
+  // "Unknown suffix 'N' used for variable 'port'".
+  const rawHost = (process.env.CLOUD_PROVISION_HOST || '').trim();
+  const rawPort = (process.env.CLOUD_PROVISION_PORT || '').trim();
+  const rawUser = (process.env.CLOUD_PROVISION_USER || '').trim();
+
+  const unresolved = (v: string) => v.includes('${{') || v.includes('}}');
+  for (const [name, value] of [
+    ['CLOUD_PROVISION_HOST', rawHost],
+    ['CLOUD_PROVISION_PORT', rawPort],
+    ['CLOUD_PROVISION_USER', rawUser],
+  ] as const) {
+    if (unresolved(value)) {
+      throw new Error(
+        `${name} still contains an unresolved Railway reference (${value}). ` +
+        `Check the referenced service name matches exactly, or set a literal value.`
+      );
+    }
+  }
+
+  const port = rawPort ? Number(rawPort) : 3306;
+  if (!Number.isFinite(port) || port <= 0) {
+    throw new Error(`CLOUD_PROVISION_PORT is not a valid port number (got "${rawPort}").`);
+  }
+
   const admin = {
-    host: process.env.CLOUD_PROVISION_HOST,
-    port: Number(process.env.CLOUD_PROVISION_PORT || 3306),
-    user: process.env.CLOUD_PROVISION_USER,
+    host: rawHost,
+    port,
+    user: rawUser,
     password: process.env.CLOUD_PROVISION_PASSWORD,
   };
   if (!admin.host || !admin.user) throw new Error('Set CLOUD_PROVISION_HOST/PORT/USER/PASSWORD (Railway admin creds).');
