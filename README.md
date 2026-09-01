@@ -57,6 +57,49 @@ npm run server      # → http://localhost:4100
 4. **Revoke / Reactivate** from the license row. **Activations** tab lists every
    machine and lets you **Release** a seat (e.g. to move to a new PC).
 
+## Creating a cloud customer (dashboard)
+
+**Dashboard → Customers → Create Cloud Customer** onboards a hosted-web
+customer in one action: it issues a **licence**, **provisions their cloud
+database** on Railway (schema cloned from the reference DB, scoped user
+created), and **mints a hosted signed token** — then hands you a ready-to-paste
+Railway environment block (`DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`,
+`LICENSE_KEY`, ...) for that customer's deployment.
+
+- **Admin only.** The `POST /api/cloud-customers` endpoint enforces
+  `session.role === 'admin'` — provisioning uses admin MySQL credentials that
+  can create databases and users, so it's restricted the same way
+  `/api/users` is.
+- **Requires `PUBLIC_SERVER_URL`.** Set it to this licence server's own public
+  URL (e.g. `https://license.example.com`) so the generated env block's
+  `LICENSE_SERVER_URL` is correct. Without it, the dashboard shows a
+  placeholder instead of guessing — it used to fall back to
+  `http://localhost:<port>`, which is always wrong once pasted into a
+  customer's own Railway service.
+- **Terminals field.** Set `max_activations` to the number of tills the store
+  actually runs, not the number of machines. Cloud seats are counted from the
+  POS's `pos_terminals` table, so leaving this at 1 blocks the store from ever
+  adding a second till.
+- **The three steps are not atomic.** Licence creation, database provisioning,
+  and token minting run as separate steps. If provisioning or minting fails,
+  the licence is **kept** (never rolled back), and the modal shows exactly
+  which steps succeeded. `provision-cloud` is idempotent, so it's safe to
+  re-run the CLI fallback to finish a partially-failed onboarding:
+
+  ```bash
+  npm run provision-cloud -- --license VRDX-XXXX-XXXX-XXXX
+  npm run new -- --product-key VRDX-XXXX-XXXX-XXXX --web --edition web
+  ```
+
+- **The CLI still works** and remains the documented fallback for both
+  provisioning and token minting — see below.
+- **Testing** — use `./staging.sh` (`server | migrate | seed-admin | psql |
+  reset`), never the production database. The repo's `.env` points
+  `LICENSE_DB_HOST` at `metro.proxy.rlwy.net`, the **live** licence database
+  holding real customer licences; `./staging.sh` overrides those variables to
+  a local staging database and refuses to run if the target doesn't look like
+  staging.
+
 ## Command-line issuing
 
 ```bash
@@ -90,6 +133,10 @@ LICENSE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----
 
 # Port (default 4100)
 LICENSE_UI_PORT=4100
+
+# Public URL of this server — required for the Create Cloud Customer dashboard
+# flow to generate a correct LICENSE_SERVER_URL in the env block.
+PUBLIC_SERVER_URL=https://license.example.com
 ```
 
 If `LICENSE_DB_*` is unset it uses `CLOUD_DB_*` (Railway), then `DB_*` (local).

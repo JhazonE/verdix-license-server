@@ -26,10 +26,23 @@ function flag(name: string): boolean {
   return process.argv.includes(`--${name}`);
 }
 
-async function main() {
-  const productKey = (arg('license') || '').trim();
-  if (!productKey) throw new Error('Usage: cloud:provision -- --license VRDX-XXXX-XXXX-XXXX');
+export interface ProvisionResult {
+  dbName: string;
+  dbUser: string;
+  password: string;
+  host: string;
+  port: number;
+}
 
+/**
+ * Provisions a per-customer cloud database and records its encrypted config.
+ * Shared by the CLI (`npm run provision-cloud`) and POST /api/cloud-customers.
+ * Idempotent: re-running reuses the existing database and user.
+ */
+export async function provisionCloudDatabase(
+  productKey: string,
+  opts: { rotatePassword?: boolean } = {}
+): Promise<ProvisionResult> {
   const admin = {
     host: process.env.CLOUD_PROVISION_HOST,
     port: Number(process.env.CLOUD_PROVISION_PORT || 3306),
@@ -45,7 +58,7 @@ async function main() {
 
   const { dbName, dbUser } = deriveTenantNames(license.id);
   const existing = await getCloudConfig(license.id);
-  const rotate = flag('rotate-password');
+  const rotate = !!opts.rotatePassword;
   const isNewPassword = !existing || rotate;
   const password = isNewPassword
     ? crypto.randomBytes(18).toString('base64').replace(/[^A-Za-z0-9]/g, '').slice(0, 24)
@@ -84,9 +97,16 @@ async function main() {
   });
   await addLicenseFeature(license.id, 'cloud-sync');
 
+  return { dbName, dbUser, password, host: admin.host, port: admin.port };
+}
+
+async function main() {
+  const productKey = (arg('license') || '').trim();
+  if (!productKey) throw new Error('Usage: cloud:provision -- --license VRDX-XXXX-XXXX-XXXX');
+  const res = await provisionCloudDatabase(productKey, { rotatePassword: flag('rotate-password') });
   console.log(`\n✅ Provisioned cloud DB for ${productKey}`);
-  console.log(`   database: ${dbName}`);
-  console.log(`   user:     ${dbUser}`);
+  console.log(`   database: ${res.dbName}`);
+  console.log(`   user:     ${res.dbUser}`);
   console.log(`   feature 'cloud-sync' added to the license.`);
 }
 

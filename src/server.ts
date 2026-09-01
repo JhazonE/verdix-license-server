@@ -37,6 +37,8 @@ import { listProducts, createProduct, getProduct, setProductEmbedMark, setProduc
 import { hasPrivateKey, getPrivateKeySource, getKeyFileHint } from './keys';
 import { publicKeyFingerprint, deriveEmbedState, deriveSetupPill } from './setup-status';
 import { sendWebhook } from './webhooks';
+import { provisionCloudDatabase, ProvisionResult } from './provision-cloud';
+import { HOSTED_MACHINE_ID } from './licensing/core';
 
 dotenv.config();
 
@@ -515,6 +517,89 @@ async function handle(req: Req, res: Res) {
       if (method === 'POST' && relMatch) {
         await svc.releaseActivation(relMatch[1]);
         return sendJson(res, 200, { success: true });
+      }
+
+      // POST /api/cloud-customers — admin-only onboarding orchestration: create
+      // licence, provision the tenant database, mint a hosted signed token.
+      // The three steps are NOT atomic — see the step comments below.
+      if (method === 'POST' && p === '/api/cloud-customers') {
+        // Provisioning uses admin MySQL credentials that can create databases
+        // and users — restrict it the same way /api/users is restricted.
+        if (session.role !== 'admin')
+          return sendJson(res, 403, { success: false, error: 'Admin role required.' });
+
+        const body = await readBody(req);
+        const errors: string[] = [];
+
+        // Step 1 — create the licence. A failure here aborts: there is nothing to provision.
+        let license: any;
+        try {
+          license = await svc.createLicense({ ...body, created_by: session.username });
+        } catch (e: any) {
+          return sendJson(res, 400, { success: false, error: 'License creation failed: ' + e.message });
+        }
+
+        const data: any = {
+          license: { ok: true, id: license.id, product_key: license.product_key },
+          database: { ok: false },
+          token: { ok: false },
+          errors,
+        };
+
+        // Step 2 — provision the database (skippable).
+        let prov: ProvisionResult | null = null;
+        if (body.provision_database !== false) {
+          try {
+            prov = await provisionCloudDatabase(license.product_key);
+            data.database = { ok: true, name: prov.dbName, user: prov.dbUser, password: prov.password, host: prov.host, port: prov.port };
+          } catch (e: any) {
+            data.database = { ok: false, error: e.message };
+            errors.push('database: ' + e.message);
+          }
+        } else {
+          data.database = { ok: false, skipped: true };
+        }
+
+        // Step 3 — mint the hosted token. Runs even if step 2 failed: a licence with a
+        // token but no database is recoverable, and the operator needs to see both states.
+        // Re-read the licence first: step 2's addLicenseFeature('cloud-sync') only UPDATEs
+        // the DB row, it can't mutate the in-memory `license` object from step 1. Signing
+        // the stale snapshot would mint a token missing features the DB row actually has —
+        // mirror offline-cli.ts, which re-reads by product key after provisioning for the
+        // same reason.
+        try {
+          const fresh = (await svc.getLicense(license.id)) || license;
+          const { signedLicense } = await svc.issueSignedLicense(fresh, HOSTED_MACHINE_ID, { record: true });
+          data.token = { ok: true, signedLicense };
+        } catch (e: any) {
+          data.token = { ok: false, error: e.message };
+          errors.push('token: ' + e.message);
+        }
+
+        // PUBLIC_SERVER_URL must be set explicitly — there is no safe way to infer the
+        // server's externally-reachable URL from the request or from PORT. Guessing
+        // `http://localhost:<port>` produced a plausible-looking value that is always wrong
+        // once pasted into a customer's own Railway service (it points at their own
+        // container). A loud placeholder is safer than a silent wrong answer.
+        const serverUrl = process.env.PUBLIC_SERVER_URL;
+        if (!serverUrl) {
+          data.env_warning = 'PUBLIC_SERVER_URL is not set on this licence server — fill in LICENSE_SERVER_URL by hand before pasting.';
+        }
+
+        if (prov && data.token.ok) {
+          data.env = {
+            DB_HOST: prov.host,
+            DB_PORT: String(prov.port),
+            DB_USER: prov.dbUser,
+            DB_PASSWORD: prov.password,
+            DB_NAME: prov.dbName,
+            DB_SSL: 'true',
+            LICENSE_KEY: data.token.signedLicense,
+            LICENSE_SERVER_URL: serverUrl || '<SET PUBLIC_SERVER_URL ON THE LICENCE SERVER>',
+          };
+        }
+
+        return sendJson(res, 200, { success: true, data });
       }
 
       // Admin user management (administrators only)
