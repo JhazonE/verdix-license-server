@@ -10,3 +10,6 @@ dist/
 
 # Playwright MCP browser-verification artifacts
 .playwright-mcp/
+
+# Git worktrees for isolated feature work
+/.worktrees/
