@@ -1,0 +1,11 @@
+# Without this, `COPY . .` overwrites the image's Linux node_modules with the
+# host's — on Windows that ships the wrong esbuild binary and the container dies
+# at startup with "You installed esbuild for another platform".
+node_modules
+
+# Never bake secrets or local scratch into the image.
+.env
+keys
+.git
+.worktrees
+.superpowers
