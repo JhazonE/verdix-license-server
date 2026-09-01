@@ -80,23 +80,42 @@ export async function provisionCloudDatabase(
 
   // Load schema from reference DB (structure only) into the new tenant DB.
   //
-  // NOTE: do not add `--set-gtid-purged=OFF` here. The container ships Alpine's
-  // `mariadb-client`, whose mysqldump rejects that MySQL-only flag outright
-  // ("unknown variable 'set-gtid-purged=OFF'") and exits non-zero, so every
-  // provisioning run would fail on the server while working on a dev machine
-  // that has MySQL's own client. The flag only suppresses GTID statements, which
-  // a `--no-data` schema clone does not emit anyway.
+  // Both calls are bounded by a timeout. Without one, a slow link to the database
+  // makes the HTTP request hang with no explanation — cloning ~83 tables over
+  // Railway's PUBLIC proxy took over ten minutes in testing, while the internal
+  // network is quick. If these time out, check that CLOUD_PROVISION_HOST uses
+  // Railway's internal reference (${{MySQL.MYSQLHOST}}) rather than the public
+  // *.proxy.rlwy.net hostname.
+  //
+  // NOTE: `--set-gtid-purged=OFF` is deliberately absent. It only suppresses GTID
+  // statements, which a `--no-data` clone does not emit, and it is rejected
+  // outright by MariaDB clients — which is what most distro "mysql-client"
+  // packages actually install.
+  const STEP_TIMEOUT_MS = Number(process.env.CLOUD_PROVISION_TIMEOUT_MS || 240000);
+
   console.log(`Loading schema from '${refDb}' into '${dbName}' ...`);
   const dump = spawnSync('mysqldump', [
     '-h', admin.host, '-P', String(admin.port), '-u', admin.user,
     '--no-data', '--skip-add-locks', refDb,
-  ], { encoding: 'buffer', maxBuffer: 256 * 1024 * 1024, env: { ...process.env, MYSQL_PWD: admin.password } });
+  ], { encoding: 'buffer', maxBuffer: 256 * 1024 * 1024, timeout: STEP_TIMEOUT_MS, env: { ...process.env, MYSQL_PWD: admin.password } });
+  if (dump.signal === 'SIGTERM') {
+    throw new Error(
+      `mysqldump timed out after ${STEP_TIMEOUT_MS / 1000}s reading '${refDb}'. ` +
+      `If CLOUD_PROVISION_HOST is a public *.proxy.rlwy.net address, switch it to the internal one.`
+    );
+  }
   if (dump.status !== 0) throw new Error('mysqldump failed: ' + (dump.error?.message || dump.stderr?.toString() || 'unknown'));
 
   const load = spawnSync('mysql', [
     '-h', admin.host, '-P', String(admin.port), '-u', admin.user,
     dbName,
-  ], { input: dump.stdout, encoding: 'buffer', maxBuffer: 256 * 1024 * 1024, env: { ...process.env, MYSQL_PWD: admin.password } });
+  ], { input: dump.stdout, encoding: 'buffer', maxBuffer: 256 * 1024 * 1024, timeout: STEP_TIMEOUT_MS, env: { ...process.env, MYSQL_PWD: admin.password } });
+  if (load.signal === 'SIGTERM') {
+    throw new Error(
+      `schema load timed out after ${STEP_TIMEOUT_MS / 1000}s writing '${dbName}'. ` +
+      `If CLOUD_PROVISION_HOST is a public *.proxy.rlwy.net address, switch it to the internal one.`
+    );
+  }
   if (load.status !== 0) throw new Error('schema load failed: ' + (load.error?.message || load.stderr?.toString() || 'unknown'));
 
   await upsertCloudConfig(license.id, {

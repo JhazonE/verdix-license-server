@@ -716,13 +716,40 @@ async function submitCloudCustomer() {
   };
 
   $('cc-submit').disabled = true;
-  $('cc-steps').innerHTML = '<p class="muted" style="font-size:13px">Working…</p>';
+  // Provisioning clones the whole reference schema, so this can take a while.
+  // Show elapsed time and a hint once it runs long, rather than a static
+  // "Working…" that gives no way to tell progress from a hang.
+  const startedAt = Date.now();
+  const tick = () => {
+    const s = Math.round((Date.now() - startedAt) / 1000);
+    $('cc-steps').innerHTML =
+      `<p class="muted" style="font-size:13px">Working… ${s}s</p>` +
+      (s > 45
+        ? '<p class="muted" style="font-size:12px">Cloning the reference schema. If this passes a few minutes, ' +
+          'CLOUD_PROVISION_HOST may be pointing at the public proxy instead of the internal database address.</p>'
+        : '');
+  };
+  tick();
+  const ticker = setInterval(tick, 1000);
 
-  const res = await api('/api/cloud-customers', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  let res;
+  try {
+    res = await api('/api/cloud-customers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    // A dropped connection must not leave the ticker running forever.
+    clearInterval(ticker);
+    $('cc-steps').innerHTML = '';
+    $('cc-submit').disabled = false;
+    err.textContent = 'The request did not complete: ' + (e && e.message ? e.message : 'connection lost') +
+      '. The licence may still have been created — check the Licenses tab before retrying.';
+    err.classList.add('show');
+    return;
+  }
+  clearInterval(ticker);
 
   $('cc-submit').disabled = false;
 
