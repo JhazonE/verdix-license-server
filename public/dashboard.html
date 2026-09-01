@@ -288,6 +288,7 @@
           </select>
           <input class="search" id="licenses-search" placeholder="Search key, customer, status…" oninput="renderLicenses()" />
           <button class="btn" onclick="openLicenseModal()">+ Issue License</button>
+          <button class="btn" id="btn-cloud-customer" style="display:none" onclick="openCloudCustomerModal()">Create Cloud Customer</button>
         </div>
         <div class="card" id="licenses-table"></div>
       </section>
@@ -593,6 +594,52 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           Copy Key
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Cloud Customer: license + database + hosted token in one step -->
+  <div class="drawer-overlay" id="cloud-customer-modal" onclick="if(event.target===this)closeModal('cloud-customer-modal')">
+    <div class="drawer">
+      <div class="drawer-head">
+        <div class="ic" style="background:rgba(59,130,246,.15)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+        </div>
+        <div><h3>Create Cloud Customer</h3><p>Licence, database and hosted token in one step</p></div>
+        <button class="x" onclick="closeModal('cloud-customer-modal')">✕</button>
+      </div>
+      <div class="drawer-body">
+        <label>Customer</label>
+        <select id="cc-customer"></select>
+        <label>Product</label>
+        <select id="cc-product"></select>
+        <label>Edition</label>
+        <input id="cc-edition" value="web">
+        <label>Terminals (max_activations)</label>
+        <input id="cc-seats" type="number" min="1" value="1">
+        <p class="muted" style="margin:4px 0 14px;font-size:12px">
+          Cloud seats are counted from the store's terminals, not from machines.
+          Set this to the number of tills the store actually runs — leaving it at 1
+          blocks them from adding a second till.
+        </p>
+        <label>Expiry date</label>
+        <input id="cc-expires" type="date">
+        <label>Features (comma separated)</label>
+        <input id="cc-features" value="cloud-sync">
+        <label style="display:flex;align-items:center;gap:8px;margin-top:14px">
+          <input id="cc-provision" type="checkbox" checked> Provision cloud database
+        </label>
+        <div id="cc-err" class="err"></div>
+        <div id="cc-steps" style="margin-top:16px"></div>
+        <div id="cc-env-wrap" style="display:none;margin-top:16px">
+          <label>Railway environment variables</label>
+          <div class="keyout"><pre id="cc-env" style="white-space:pre-wrap;word-break:break-all;margin:0;font-size:12px"></pre></div>
+        </div>
+      </div>
+      <div class="drawer-foot">
+        <button class="btn" onclick="closeModal('cloud-customer-modal')">Close</button>
+        <button class="btn primary" id="cc-submit" onclick="submitCloudCustomer()">Create</button>
+        <button class="btn" id="cc-copy" style="display:none" onclick="copyCloudEnv()">Copy Env Block</button>
       </div>
     </div>
   </div>

@@ -2,6 +2,7 @@
 
 let customersCache = [];
 let productsCache = [];
+let currentRole = null;
 let licensesCache = [];
 let activationsCache = [];
 let usersCache = [];
@@ -679,6 +680,90 @@ async function copyIssuedKey() {
     setTimeout(() => $('issued-copy-btn').textContent = 'Copy Key', 1500);
   } catch {}
 }
+function openCloudCustomerModal() {
+  if (!customersCache.length) { alert('Create a customer first.'); return; }
+  $('cc-customer').innerHTML = customersCache.map((c) => `<option value="${c.id}">${esc(c.business_name)}</option>`).join('');
+  const active = productsCache.filter((p) => p.status !== 'inactive');
+  $('cc-product').innerHTML = active.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  if (active.some((p) => p.id === 'verdix-pos')) $('cc-product').value = 'verdix-pos';
+  $('cc-edition').value = 'web';
+  $('cc-seats').value = '1';
+  $('cc-expires').value = '';
+  $('cc-features').value = 'cloud-sync';
+  $('cc-provision').checked = true;
+  $('cc-err').classList.remove('show');
+  $('cc-steps').innerHTML = '';
+  $('cc-env-wrap').style.display = 'none';
+  $('cc-copy').style.display = 'none';
+  $('cc-submit').style.display = '';
+  show('cloud-customer-modal');
+}
+async function submitCloudCustomer() {
+  const err = $('cc-err');
+  err.classList.remove('show');
+  const expires = val('cc-expires');
+  if (!expires) { err.textContent = 'Set an expiry date.'; err.classList.add('show'); return; }
+
+  const body = {
+    customer_id: val('cc-customer'),
+    product_id: val('cc-product') || undefined,
+    edition: val('cc-edition'),
+    type: 'subscription',
+    expires_at: new Date(expires + 'T23:59:59').toISOString(),
+    max_activations: parseInt(val('cc-seats') || '1', 10),
+    features: val('cc-features').split(',').map((f) => f.trim()).filter(Boolean),
+    provision_database: $('cc-provision').checked,
+  };
+
+  $('cc-submit').disabled = true;
+  $('cc-steps').innerHTML = '<p class="muted" style="font-size:13px">Working…</p>';
+
+  const res = await api('/api/cloud-customers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  $('cc-submit').disabled = false;
+
+  if (!res.success) {
+    $('cc-steps').innerHTML = '';
+    err.textContent = res.error || 'Failed.';
+    err.classList.add('show');
+    return;
+  }
+
+  const d = res.data;
+  const row = (ok, label, detail) =>
+    `<div style="display:flex;gap:8px;font-size:13px;margin-bottom:6px">
+       <span style="color:${ok ? '#86efac' : '#fca5a5'}">${ok ? '✓' : '✕'}</span>
+       <span>${esc(label)}</span>
+       <span class="muted" style="word-break:break-all">${esc(detail || '')}</span>
+     </div>`;
+
+  $('cc-steps').innerHTML =
+    row(d.license.ok, 'Licence created', d.license.product_key) +
+    row(d.database.ok, d.database.skipped ? 'Database skipped' : 'Database provisioned',
+        d.database.ok ? d.database.name : (d.database.error || '')) +
+    row(d.token.ok, 'Hosted token minted',
+        d.token.ok ? d.token.signedLicense.slice(0, 24) + '…' : (d.token.error || ''));
+
+  if (d.env) {
+    $('cc-env').textContent = Object.entries(d.env).map(([k, v]) => `${k}=${v}`).join('\n');
+    $('cc-env-wrap').style.display = '';
+    $('cc-copy').style.display = '';
+    $('cc-submit').style.display = 'none';
+  }
+
+  loadLicenses();
+}
+async function copyCloudEnv() {
+  try {
+    await navigator.clipboard.writeText($('cc-env').textContent);
+    $('cc-copy').textContent = '✓ Copied';
+    setTimeout(() => { $('cc-copy').textContent = 'Copy Env Block'; }, 1500);
+  } catch {}
+}
 async function setStatus(id, status) {
   if (status === 'revoked') {
     openConfirm({
@@ -980,10 +1065,13 @@ async function logout() { await api('/api/logout', { method: 'POST' }); location
       $('who').textContent = me.data.username;
       const av = $('user-av');
       if (av) av.textContent = (me.data.username || 'A').charAt(0).toUpperCase();
+      currentRole = me.data.role;
       if (me.data.role !== 'admin') {
         const navUsers = $('nav-users'); if (navUsers) navUsers.style.display = 'none';
         const navConfig = $('nav-config'); if (navConfig) navConfig.style.display = 'none';
       }
+      const cloudBtn = $('btn-cloud-customer');
+      if (cloudBtn) cloudBtn.style.display = currentRole === 'admin' ? '' : 'none';
     }
   } catch {}
   loadStats();
