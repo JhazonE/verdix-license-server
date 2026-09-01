@@ -9,7 +9,6 @@
  * Idempotent: re-running reuses the DB/user; --rotate-password resets the pw.
  */
 import crypto from 'crypto';
-import { spawnSync } from 'child_process';
 import mysql from 'mysql2/promise';
 import { getLicenseByProductKey, getCloudConfig, upsertCloudConfig, addLicenseFeature } from './service';
 
@@ -106,45 +105,75 @@ export async function provisionCloudDatabase(
     await conn.end();
   }
 
-  // Load schema from reference DB (structure only) into the new tenant DB.
+  // Clone the reference schema into the new tenant database — SERVER-SIDE.
   //
-  // Both calls are bounded by a timeout. Without one, a slow link to the database
-  // makes the HTTP request hang with no explanation — cloning ~83 tables over
-  // Railway's PUBLIC proxy took over ten minutes in testing, while the internal
-  // network is quick. If these time out, check that CLOUD_PROVISION_HOST uses
-  // Railway's internal reference (${{MySQL.MYSQLHOST}}) rather than the public
-  // *.proxy.rlwy.net hostname.
+  // This deliberately does NOT shell out to `mysqldump | mysql`. That approach
+  // streams the whole schema out to this process and back again, one round trip
+  // per table; over Railway's proxy it took more than ten minutes for ~83 tables
+  // and routinely timed out. `CREATE TABLE ... LIKE` runs entirely inside MySQL,
+  // so nothing crosses the network: the same 83 tables clone in about five
+  // seconds. It also removes the dependency on client binaries being present in
+  // the container at all.
   //
-  // NOTE: `--set-gtid-purged=OFF` is deliberately absent. It only suppresses GTID
-  // statements, which a `--no-data` clone does not emit, and it is rejected
-  // outright by MariaDB clients — which is what most distro "mysql-client"
-  // packages actually install.
-  const STEP_TIMEOUT_MS = Number(process.env.CLOUD_PROVISION_TIMEOUT_MS || 240000);
+  // Both databases live on the same server (that is what makes this possible),
+  // which holds for this deployment: tenant databases are created on the same
+  // MySQL instance as the reference database.
+  console.log(`Cloning schema from '${refDb}' into '${dbName}' ...`);
+  const copy = await mysql.createConnection({ ...admin, ssl: { rejectUnauthorized: false }, multipleStatements: true });
+  try {
+    // FK checks off while cloning: tables arrive in arbitrary order, so a child
+    // table may be created before its parent.
+    await copy.query('SET FOREIGN_KEY_CHECKS=0');
 
-  console.log(`Loading schema from '${refDb}' into '${dbName}' ...`);
-  const dump = spawnSync('mysqldump', [
-    '-h', admin.host, '-P', String(admin.port), '-u', admin.user,
-    '--no-data', '--skip-add-locks', refDb,
-  ], { encoding: 'buffer', maxBuffer: 256 * 1024 * 1024, timeout: STEP_TIMEOUT_MS, env: { ...process.env, MYSQL_PWD: admin.password } });
-  if (dump.signal === 'SIGTERM') {
-    throw new Error(
-      `mysqldump timed out after ${STEP_TIMEOUT_MS / 1000}s reading '${refDb}'. ` +
-      `If CLOUD_PROVISION_HOST is a public *.proxy.rlwy.net address, switch it to the internal one.`
+    const [tables] = await copy.query<any[]>(
+      `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'`, [refDb]
     );
-  }
-  if (dump.status !== 0) throw new Error('mysqldump failed: ' + (dump.error?.message || dump.stderr?.toString() || 'unknown'));
+    if (!tables.length) {
+      throw new Error(
+        `Reference database '${refDb}' has no tables. Check CLOUD_PROVISION_REF_DB points at a database holding the POS schema.`
+      );
+    }
+    for (const t of tables) {
+      await copy.query(`CREATE TABLE IF NOT EXISTS \`${dbName}\`.\`${t.TABLE_NAME}\` LIKE \`${refDb}\`.\`${t.TABLE_NAME}\``);
+    }
 
-  const load = spawnSync('mysql', [
-    '-h', admin.host, '-P', String(admin.port), '-u', admin.user,
-    dbName,
-  ], { input: dump.stdout, encoding: 'buffer', maxBuffer: 256 * 1024 * 1024, timeout: STEP_TIMEOUT_MS, env: { ...process.env, MYSQL_PWD: admin.password } });
-  if (load.signal === 'SIGTERM') {
-    throw new Error(
-      `schema load timed out after ${STEP_TIMEOUT_MS / 1000}s writing '${dbName}'. ` +
-      `If CLOUD_PROVISION_HOST is a public *.proxy.rlwy.net address, switch it to the internal one.`
+    // `CREATE TABLE ... LIKE` copies columns and indexes but NOT foreign keys,
+    // so they are recreated from the reference database's own definitions.
+    const [fks] = await copy.query<any[]>(
+      `SELECT k.TABLE_NAME, k.CONSTRAINT_NAME, k.REFERENCED_TABLE_NAME,
+              GROUP_CONCAT(CONCAT('\`', k.COLUMN_NAME, '\`') ORDER BY k.ORDINAL_POSITION) AS cols,
+              GROUP_CONCAT(CONCAT('\`', k.REFERENCED_COLUMN_NAME, '\`') ORDER BY k.ORDINAL_POSITION) AS ref_cols,
+              r.DELETE_RULE, r.UPDATE_RULE
+         FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE k
+         JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS r
+           ON r.CONSTRAINT_SCHEMA = k.TABLE_SCHEMA
+          AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME
+          AND r.TABLE_NAME = k.TABLE_NAME
+        WHERE k.TABLE_SCHEMA = ? AND k.REFERENCED_TABLE_NAME IS NOT NULL
+        GROUP BY k.TABLE_NAME, k.CONSTRAINT_NAME, k.REFERENCED_TABLE_NAME, r.DELETE_RULE, r.UPDATE_RULE`,
+      [refDb]
     );
+    for (const f of fks) {
+      try {
+        await copy.query(
+          `ALTER TABLE \`${dbName}\`.\`${f.TABLE_NAME}\`
+             ADD CONSTRAINT \`${f.CONSTRAINT_NAME}\` FOREIGN KEY (${f.cols})
+             REFERENCES \`${dbName}\`.\`${f.REFERENCED_TABLE_NAME}\` (${f.ref_cols})
+             ON DELETE ${f.DELETE_RULE} ON UPDATE ${f.UPDATE_RULE}`
+        );
+      } catch (e: any) {
+        // Re-running provisioning finds the constraint already present; that is
+        // the idempotent path, not a failure.
+        if (!/Duplicate (foreign key|key name)|already exists/i.test(e.message || '')) throw e;
+      }
+    }
+
+    await copy.query('SET FOREIGN_KEY_CHECKS=1');
+    console.log(`  ${tables.length} tables, ${fks.length} foreign keys`);
+  } finally {
+    await copy.end();
   }
-  if (load.status !== 0) throw new Error('schema load failed: ' + (load.error?.message || load.stderr?.toString() || 'unknown'));
 
   await upsertCloudConfig(license.id, {
     host: admin.host, port: admin.port, name: dbName, user: dbUser, password,
