@@ -37,6 +37,8 @@ import { listProducts, createProduct, getProduct, setProductEmbedMark, setProduc
 import { hasPrivateKey, getPrivateKeySource, getKeyFileHint } from './keys';
 import { publicKeyFingerprint, deriveEmbedState, deriveSetupPill } from './setup-status';
 import { sendWebhook } from './webhooks';
+import { provisionCloudDatabase, ProvisionResult } from './provision-cloud';
+import { HOSTED_MACHINE_ID } from './licensing/core';
 
 dotenv.config();
 
@@ -515,6 +517,73 @@ async function handle(req: Req, res: Res) {
       if (method === 'POST' && relMatch) {
         await svc.releaseActivation(relMatch[1]);
         return sendJson(res, 200, { success: true });
+      }
+
+      // POST /api/cloud-customers — admin-only onboarding orchestration: create
+      // licence, provision the tenant database, mint a hosted signed token.
+      // The three steps are NOT atomic — see the step comments below.
+      if (method === 'POST' && p === '/api/cloud-customers') {
+        // Provisioning uses admin MySQL credentials that can create databases
+        // and users — restrict it the same way /api/users is restricted.
+        if (session.role !== 'admin')
+          return sendJson(res, 403, { success: false, error: 'Admin role required.' });
+
+        const body = await readBody(req);
+        const errors: string[] = [];
+
+        // Step 1 — create the licence. A failure here aborts: there is nothing to provision.
+        let license: any;
+        try {
+          license = await svc.createLicense({ ...body, created_by: session.username });
+        } catch (e: any) {
+          return sendJson(res, 400, { success: false, error: 'License creation failed: ' + e.message });
+        }
+
+        const data: any = {
+          license: { ok: true, id: license.id, product_key: license.product_key },
+          database: { ok: false },
+          token: { ok: false },
+          errors,
+        };
+
+        // Step 2 — provision the database (skippable).
+        let prov: ProvisionResult | null = null;
+        if (body.provision_database !== false) {
+          try {
+            prov = await provisionCloudDatabase(license.product_key);
+            data.database = { ok: true, name: prov.dbName, user: prov.dbUser, password: prov.password, host: prov.host, port: prov.port };
+          } catch (e: any) {
+            data.database = { ok: false, error: e.message };
+            errors.push('database: ' + e.message);
+          }
+        } else {
+          data.database = { ok: false, skipped: true };
+        }
+
+        // Step 3 — mint the hosted token. Runs even if step 2 failed: a licence with a
+        // token but no database is recoverable, and the operator needs to see both states.
+        try {
+          const { signedLicense } = await svc.issueSignedLicense(license, HOSTED_MACHINE_ID, { record: true });
+          data.token = { ok: true, signedLicense };
+        } catch (e: any) {
+          data.token = { ok: false, error: e.message };
+          errors.push('token: ' + e.message);
+        }
+
+        if (prov && data.token.ok) {
+          data.env = {
+            DB_HOST: prov.host,
+            DB_PORT: String(prov.port),
+            DB_USER: prov.dbUser,
+            DB_PASSWORD: prov.password,
+            DB_NAME: prov.dbName,
+            DB_SSL: 'true',
+            LICENSE_KEY: data.token.signedLicense,
+            LICENSE_SERVER_URL: process.env.PUBLIC_SERVER_URL || `http://localhost:${process.env.PORT || process.env.LICENSE_UI_PORT || 4100}`,
+          };
+        }
+
+        return sendJson(res, 200, { success: true, data });
       }
 
       // Admin user management (administrators only)
