@@ -79,10 +79,17 @@ export async function provisionCloudDatabase(
   }
 
   // Load schema from reference DB (structure only) into the new tenant DB.
+  //
+  // NOTE: do not add `--set-gtid-purged=OFF` here. The container ships Alpine's
+  // `mariadb-client`, whose mysqldump rejects that MySQL-only flag outright
+  // ("unknown variable 'set-gtid-purged=OFF'") and exits non-zero, so every
+  // provisioning run would fail on the server while working on a dev machine
+  // that has MySQL's own client. The flag only suppresses GTID statements, which
+  // a `--no-data` schema clone does not emit anyway.
   console.log(`Loading schema from '${refDb}' into '${dbName}' ...`);
   const dump = spawnSync('mysqldump', [
     '-h', admin.host, '-P', String(admin.port), '-u', admin.user,
-    '--no-data', '--skip-add-locks', '--set-gtid-purged=OFF', refDb,
+    '--no-data', '--skip-add-locks', refDb,
   ], { encoding: 'buffer', maxBuffer: 256 * 1024 * 1024, env: { ...process.env, MYSQL_PWD: admin.password } });
   if (dump.status !== 0) throw new Error('mysqldump failed: ' + (dump.error?.message || dump.stderr?.toString() || 'unknown'));
 
