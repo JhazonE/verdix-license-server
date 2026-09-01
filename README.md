@@ -70,6 +70,12 @@ Railway environment block (`DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`,
   `session.role === 'admin'` — provisioning uses admin MySQL credentials that
   can create databases and users, so it's restricted the same way
   `/api/users` is.
+- **Requires `PUBLIC_SERVER_URL`.** Set it to this licence server's own public
+  URL (e.g. `https://license.example.com`) so the generated env block's
+  `LICENSE_SERVER_URL` is correct. Without it, the dashboard shows a
+  placeholder instead of guessing — it used to fall back to
+  `http://localhost:<port>`, which is always wrong once pasted into a
+  customer's own Railway service.
 - **Terminals field.** Set `max_activations` to the number of tills the store
   actually runs, not the number of machines. Cloud seats are counted from the
   POS's `pos_terminals` table, so leaving this at 1 blocks the store from ever
@@ -127,6 +133,10 @@ LICENSE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----
 
 # Port (default 4100)
 LICENSE_UI_PORT=4100
+
+# Public URL of this server — required for the Create Cloud Customer dashboard
+# flow to generate a correct LICENSE_SERVER_URL in the env block.
+PUBLIC_SERVER_URL=https://license.example.com
 ```
 
 If `LICENSE_DB_*` is unset it uses `CLOUD_DB_*` (Railway), then `DB_*` (local).

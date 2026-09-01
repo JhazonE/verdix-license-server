@@ -741,12 +741,32 @@ async function submitCloudCustomer() {
        <span class="muted" style="word-break:break-all">${esc(detail || '')}</span>
      </div>`;
 
+  // When d.env is absent, the env block (which normally carries the full token)
+  // won't be shown — so if the token was minted, show it in full here instead of
+  // truncating it, or it becomes unrecoverable from the UI and the operator has
+  // to re-mint via CLI, creating a second activation row.
+  const tokenDetail = d.token.ok
+    ? (d.env ? d.token.signedLicense.slice(0, 24) + '…' : d.token.signedLicense)
+    : (d.token.error || '');
+
   $('cc-steps').innerHTML =
     row(d.license.ok, 'Licence created', d.license.product_key) +
     row(d.database.ok, d.database.skipped ? 'Database skipped' : 'Database provisioned',
         d.database.ok ? d.database.name : (d.database.error || '')) +
-    row(d.token.ok, 'Hosted token minted',
-        d.token.ok ? d.token.signedLicense.slice(0, 24) + '…' : (d.token.error || ''));
+    row(d.token.ok, 'Hosted token minted', tokenDetail);
+
+  // Provisioning genuinely failed (not just skipped) — give the operator the exact
+  // CLI command to finish the job by hand, per the spec's Error handling section.
+  if (!d.database.ok && !d.database.skipped) {
+    $('cc-steps').innerHTML +=
+      `<div style="margin-top:12px"><p class="muted" style="font-size:12px">Finish provisioning by hand:</p>` +
+      `<pre style="white-space:pre-wrap;word-break:break-all;font-size:12px">npm run provision-cloud -- --license ${esc(d.license.product_key)}</pre></div>`;
+  }
+
+  if (d.env_warning) {
+    $('cc-steps').innerHTML +=
+      `<div style="margin-top:12px" class="err show">${esc(d.env_warning)}</div>`;
+  }
 
   if (d.env) {
     $('cc-env').textContent = Object.entries(d.env).map(([k, v]) => `${k}=${v}`).join('\n');

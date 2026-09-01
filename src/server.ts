@@ -562,12 +562,28 @@ async function handle(req: Req, res: Res) {
 
         // Step 3 — mint the hosted token. Runs even if step 2 failed: a licence with a
         // token but no database is recoverable, and the operator needs to see both states.
+        // Re-read the licence first: step 2's addLicenseFeature('cloud-sync') only UPDATEs
+        // the DB row, it can't mutate the in-memory `license` object from step 1. Signing
+        // the stale snapshot would mint a token missing features the DB row actually has —
+        // mirror offline-cli.ts, which re-reads by product key after provisioning for the
+        // same reason.
         try {
-          const { signedLicense } = await svc.issueSignedLicense(license, HOSTED_MACHINE_ID, { record: true });
+          const fresh = (await svc.getLicense(license.id)) || license;
+          const { signedLicense } = await svc.issueSignedLicense(fresh, HOSTED_MACHINE_ID, { record: true });
           data.token = { ok: true, signedLicense };
         } catch (e: any) {
           data.token = { ok: false, error: e.message };
           errors.push('token: ' + e.message);
+        }
+
+        // PUBLIC_SERVER_URL must be set explicitly — there is no safe way to infer the
+        // server's externally-reachable URL from the request or from PORT. Guessing
+        // `http://localhost:<port>` produced a plausible-looking value that is always wrong
+        // once pasted into a customer's own Railway service (it points at their own
+        // container). A loud placeholder is safer than a silent wrong answer.
+        const serverUrl = process.env.PUBLIC_SERVER_URL;
+        if (!serverUrl) {
+          data.env_warning = 'PUBLIC_SERVER_URL is not set on this licence server — fill in LICENSE_SERVER_URL by hand before pasting.';
         }
 
         if (prov && data.token.ok) {
@@ -579,7 +595,7 @@ async function handle(req: Req, res: Res) {
             DB_NAME: prov.dbName,
             DB_SSL: 'true',
             LICENSE_KEY: data.token.signedLicense,
-            LICENSE_SERVER_URL: process.env.PUBLIC_SERVER_URL || `http://localhost:${process.env.PORT || process.env.LICENSE_UI_PORT || 4100}`,
+            LICENSE_SERVER_URL: serverUrl || '<SET PUBLIC_SERVER_URL ON THE LICENCE SERVER>',
           };
         }
 
