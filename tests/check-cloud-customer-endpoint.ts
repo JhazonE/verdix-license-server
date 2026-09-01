@@ -39,6 +39,21 @@ async function main() {
   assert.notEqual(admin.status, 403, 'admin is not forbidden');
   assert.notEqual(admin.status, 404, 'route exists');
 
+  // (c) A non-admin must NOT reach provisioning — it runs with admin MySQL credentials.
+  await fetch(BASE + '/api/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+    body: JSON.stringify({ username: 'stafftest', password: 'staff-pw-123', role: 'staff' }),
+  }); // ignore the result: a 4xx here just means the user already exists from an earlier run
+
+  const staffCookie = await login('stafftest', 'staff-pw-123');
+  const staff = await fetch(BASE + '/api/cloud-customers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: staffCookie },
+    body: JSON.stringify({ customer_id: 'cust_staging_test', type: 'perpetual' }),
+  });
+  assert.equal(staff.status, 403, 'a staff session is forbidden from provisioning');
+
   console.log('check-cloud-customer-endpoint: all assertions passed');
   process.exit(0);
 }
