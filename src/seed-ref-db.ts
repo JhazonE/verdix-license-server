@@ -13,10 +13,11 @@
  *
  *   npm run seed-ref-db
  *
- * Both `repairRefSchema` and `copySeedRows` take an open connection with
- * `multipleStatements` enabled and require both databases to live on the same
- * MySQL instance — the same constraint that makes `CREATE TABLE ... LIKE`
- * viable in provisioning, so nothing crosses the network.
+ * Both `repairRefSchema` and `copySeedRows` take an open connection and
+ * require both databases to live on the same MySQL instance — the same
+ * constraint that makes `CREATE TABLE ... LIKE` viable in provisioning, so
+ * nothing crosses the network. Neither helper issues multiple statements in
+ * a single call, so `multipleStatements` is not required for them.
  */
 import mysql from 'mysql2/promise';
 import { SEED_TABLES } from './seed-tables';
@@ -143,30 +144,39 @@ async function main() {
     const have = new Set(refTables.map((r) => r.TABLE_NAME));
     const missing = masterTables.map((r) => r.TABLE_NAME).filter((n) => !have.has(n));
 
-    for (const name of missing) {
-      const [[ddl]]: any = await master.query(`SHOW CREATE TABLE \`${masterDb}\`.\`${name}\``);
-      const createSql = (ddl['Create Table'] as string).replace(
-        /^CREATE TABLE `/, `CREATE TABLE \`${refDb}\`.\``
-      );
-      await ref.query('SET FOREIGN_KEY_CHECKS=0');
-      await ref.query(createSql);
+    await ref.query('SET FOREIGN_KEY_CHECKS=0');
+    try {
+      for (const name of missing) {
+        const [[ddl]]: any = await master.query(`SHOW CREATE TABLE \`${masterDb}\`.\`${name}\``);
+        const original = ddl['Create Table'] as string;
+        const prefix = /^CREATE TABLE `/;
+        if (!prefix.test(original)) {
+          throw new Error(`SHOW CREATE TABLE for '${name}' did not start with the expected "CREATE TABLE \`" prefix — refusing to rewrite it blindly`);
+        }
+        const createSql = original.replace(prefix, `CREATE TABLE \`${refDb}\`.\``);
+        await ref.query(createSql);
+      }
+    } finally {
       await ref.query('SET FOREIGN_KEY_CHECKS=1');
     }
     console.log(`Schema: ${missing.length} table(s) added to '${refDb}'${missing.length ? ': ' + missing.join(', ') : ''}`);
 
     // 2. Row copy: read each seed table out of the master, write into the ref DB.
     await ref.query('SET FOREIGN_KEY_CHECKS=0');
-    for (const table of SEED_TABLES) {
-      const [rows] = await master.query<any[]>(`SELECT * FROM \`${masterDb}\`.\`${table}\``);
-      if (!rows.length) { console.log(`  ${table}: 0 rows in master, skipped`); continue; }
-      const cols = Object.keys(rows[0]).map((c) => `\`${c}\``).join(', ');
-      const values = rows.map((r) => Object.values(r));
-      await ref.query(
-        `INSERT IGNORE INTO \`${refDb}\`.\`${table}\` (${cols}) VALUES ?`, [values]
-      );
-      console.log(`  ${table}: ${rows.length} rows`);
+    try {
+      for (const table of SEED_TABLES) {
+        const [rows] = await master.query<any[]>(`SELECT * FROM \`${masterDb}\`.\`${table}\``);
+        if (!rows.length) { console.log(`  ${table}: 0 rows in master, skipped`); continue; }
+        const cols = Object.keys(rows[0]).map((c) => `\`${c}\``).join(', ');
+        const values = rows.map((r) => Object.values(r));
+        await ref.query(
+          `INSERT IGNORE INTO \`${refDb}\`.\`${table}\` (${cols}) VALUES ?`, [values]
+        );
+        console.log(`  ${table}: ${rows.length} rows`);
+      }
+    } finally {
+      await ref.query('SET FOREIGN_KEY_CHECKS=1');
     }
-    await ref.query('SET FOREIGN_KEY_CHECKS=1');
 
     console.log(`\n✅ Reference database '${refDb}' repaired and populated.`);
   } finally {
