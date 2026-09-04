@@ -34,8 +34,26 @@ is immediately usable as a clean new store.
 **Out of scope:** products, suppliers, customers, and all transactional data. A new tenant starts
 empty of business records by design.
 
-**Also out of scope:** backfilling the 9 existing empty tenant databases. Whether any of them
-belongs to a live customer is unknown and needs to be established separately.
+**Backfill:** one existing tenant needs it. There are exactly two cloud customers, and both their
+tenant databases are empty (83 tables, zero rows in `users`, `user_types`, `user_permissions`,
+`payment_methods`, `products`):
+
+| Customer | Tenant DB | Needs backfill |
+|---|---|---|
+| BHAGOHCLOUD DEMO | `verdix_c_b028b2324f` | **yes** — nothing else to fall back on |
+| OBUTA STORE | `verdix_c_d88a15f0b7` | no — see below |
+
+OBUTA's hosted POS does **not** use its provisioned tenant database. Its Railway service points at
+`DB_NAME=verdix` on `mysql-fal.railway.internal`, which holds real production data (~15k products,
+102 sales). Its `cloud_configs` row points at a tenant database it has never touched. That is why
+this seeding bug went unnoticed: provisioning ran, and its output was never used.
+
+Backfill needs no separate code path. Because Part 2 is idempotent, re-running provisioning against
+BHAGOHCLOUD's existing database seeds it without disturbing the schema.
+
+**Out of scope:** the other 7 `verdix_c_*` databases have no `cloud_configs` row and belong to no
+customer. Also out of scope: migrating OBUTA from `verdix` onto the tenant model — that is a data
+migration, not seeding.
 
 ## Design
 
@@ -138,5 +156,6 @@ tables — no products, no sales, no customers. It is a read; nothing writes bac
 ahead of the tenant schema, a tenant would be marked migrated when it is not. Mitigated by doing
 the schema refresh (1a) and the row copy (1b) in the same script run, so they cannot drift apart.
 
-**Existing empty tenants stay empty.** This work fixes provisioning going forward. Backfilling is a
-separate decision, pending an answer on whether any of the 9 is live.
+**Backfilling BHAGOHCLOUD reuses the provisioning path.** Re-running provisioning against a database
+that already exists is the idempotent path the FK step already handles; Part 2's `INSERT IGNORE`
+extends that to rows. Verify against staging before running it on the live tenant.
