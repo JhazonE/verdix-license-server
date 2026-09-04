@@ -11,6 +11,7 @@
 import crypto from 'crypto';
 import mysql from 'mysql2/promise';
 import { getLicenseByProductKey, getCloudConfig, upsertCloudConfig, addLicenseFeature } from './service';
+import { copySeedRows } from './seed-ref-db';
 
 export function deriveTenantNames(licenseId: string): { dbName: string; dbUser: string } {
   const short = crypto.createHash('sha256').update(licenseId).digest('hex').slice(0, 10);
@@ -31,6 +32,8 @@ export interface ProvisionResult {
   password: string;
   host: string;
   port: number;
+  /** Lookup table -> rows inserted during seeding. */
+  seeded: Record<string, number>;
 }
 
 /**
@@ -79,6 +82,7 @@ export async function provisionCloudDatabase(
   if (!admin.host || !admin.user) throw new Error('Set CLOUD_PROVISION_HOST/PORT/USER/PASSWORD (Railway admin creds).');
 
   const refDb = process.env.CLOUD_PROVISION_REF_DB || 'verdix'; // reference schema source (local master)
+  let seeded: Record<string, number> = {};
 
   const license = await getLicenseByProductKey(productKey);
   if (!license) throw new Error(`No license found for product key ${productKey}`);
@@ -171,6 +175,17 @@ export async function provisionCloudDatabase(
 
     await copy.query('SET FOREIGN_KEY_CHECKS=1');
     console.log(`  ${tables.length} tables, ${fks.length} foreign keys`);
+
+    // Seed operational lookup data. Without this the tenant has a complete
+    // schema and no rows: no roles, no permissions, no payment methods — and
+    // POST /api/auth/login in the POS reads users, joins user_types, then
+    // selects user_permissions, so nobody can log in.
+    //
+    // Same-server INSERT ... SELECT, so no rows cross the network, matching the
+    // CREATE TABLE ... LIKE decision above.
+    seeded = await copySeedRows(copy, refDb, dbName);
+    const seededTotal = Object.values(seeded).reduce((a, b) => a + b, 0);
+    console.log(`  seeded ${seededTotal} rows across ${Object.keys(seeded).length} lookup tables`);
   } finally {
     await copy.end();
   }
@@ -180,7 +195,7 @@ export async function provisionCloudDatabase(
   });
   await addLicenseFeature(license.id, 'cloud-sync');
 
-  return { dbName, dbUser, password, host: admin.host, port: admin.port };
+  return { dbName, dbUser, password, host: admin.host, port: admin.port, seeded };
 }
 
 async function main() {
