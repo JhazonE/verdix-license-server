@@ -625,6 +625,9 @@ function renderLicenses() {
       <td><span class="pill ${l.status}">${l.status}</span></td>
       <td style="white-space:nowrap">
         <button class="btn sm" onclick="openSignModal('${l.id}','${esc(l.product_key)}','${esc(l.business_name)}')">Generate Key</button>
+        ${(l.features || []).includes('cloud-sync')
+          ? `<button class="btn sm ghost" onclick="openCloudDetails('${l.id}','${esc(l.business_name)}')">Cloud Details</button>`
+          : ''}
         ${l.status === 'active'
           ? `<button class="btn sm danger" onclick="setStatus('${l.id}','revoked')">Revoke</button>`
           : `<button class="btn sm ghost" onclick="setStatus('${l.id}','active')">Reactivate</button>`}
@@ -820,6 +823,86 @@ async function copyCloudEnv() {
     await navigator.clipboard.writeText($('cc-env').textContent);
     $('cc-copy').textContent = '✓ Copied';
     setTimeout(() => { $('cc-copy').textContent = 'Copy Env Block'; }, 1500);
+  } catch {}
+}
+
+// Read back an existing cloud customer. The Create result is shown once, so this
+// is how an operator recovers the env block afterwards. The admin password is
+// deliberately absent — only its bcrypt hash exists, so there is nothing to show.
+async function openCloudDetails(licenseId, businessName) {
+  $('cd-sub').textContent = businessName;
+  $('cd-err').textContent = '';
+  $('cd-err').classList.remove('show');
+  $('cd-content').style.display = 'none';
+  $('cd-loading').style.display = '';
+  $('cd-copy').style.display = 'none';
+  show('cloud-details-modal');
+
+  let res;
+  try {
+    res = await api('/api/cloud-customers/' + encodeURIComponent(licenseId));
+  } catch (e) {
+    $('cd-loading').style.display = 'none';
+    $('cd-err').textContent = 'Request failed: ' + e.message;
+    $('cd-err').classList.add('show');
+    return;
+  }
+
+  $('cd-loading').style.display = 'none';
+  if (!res || !res.success) {
+    $('cd-err').textContent = (res && res.error) || 'Could not load cloud details.';
+    $('cd-err').classList.add('show');
+    return;
+  }
+
+  const d = res.data;
+  $('cd-env').textContent = Object.entries(d.env).map(([k, v]) => `${k}=${v}`).join('\n');
+
+  let warnings = '';
+  for (const w of [d.env_warning, d.token_warning, d.tenant_error]) {
+    if (w) warnings += `<div class="err show" style="margin-bottom:10px">${esc(w)}</div>`;
+  }
+  $('cd-warnings').innerHTML = warnings;
+
+  if (d.admin) {
+    $('cd-admin').innerHTML =
+      `<div class="keyout"><pre style="white-space:pre-wrap;margin:0;font-size:12px">` +
+      `username: ${esc(d.admin.username)}\n` +
+      `role    : ${esc(d.admin.userType || '—')}\n` +
+      `status  : ${d.admin.disabled ? 'DISABLED' : 'active'}\n` +
+      `created : ${esc(fmtDate(d.admin.createdAt))}\n` +
+      `access  : ${d.admin.permissionCount} permissions</pre></div>` +
+      `<p class="muted" style="margin:6px 0 0;font-size:12px">The password is stored only as a bcrypt hash and cannot be displayed. If it has been lost, the account needs a new password set directly in the tenant database.</p>`;
+  } else if (!d.tenant_error) {
+    $('cd-admin').innerHTML =
+      `<div class="err show">This tenant database has no user rows — nobody can log in. Re-run provisioning to seed it and create an administrator.</div>`;
+  } else {
+    $('cd-admin').innerHTML = `<p class="muted" style="font-size:12px">Not read — the tenant database was unreachable.</p>`;
+  }
+
+  if (d.seeded) {
+    const entries = Object.entries(d.seeded);
+    const missing = entries.filter(([, n]) => n === -1).map(([t]) => t);
+    const empty = entries.filter(([, n]) => n === 0).map(([t]) => t);
+    $('cd-seeded').innerHTML =
+      entries.filter(([, n]) => n >= 0)
+        .map(([t, n]) => `<span class="muted">${esc(t)}</span> <code class="key">${n}</code>`)
+        .join(' &nbsp; ') +
+      (missing.length ? `<div class="err show" style="margin-top:8px">Tables absent from this tenant: ${esc(missing.join(', '))}</div>` : '') +
+      (empty.length ? `<div class="err show" style="margin-top:8px">Seeded tables that are empty: ${esc(empty.join(', '))}. Re-run provisioning.</div>` : '');
+  } else {
+    $('cd-seeded').innerHTML = `<p class="muted" style="font-size:12px">Not read — the tenant database was unreachable.</p>`;
+  }
+
+  $('cd-content').style.display = '';
+  $('cd-copy').style.display = '';
+}
+
+async function copyCloudDetailsEnv() {
+  try {
+    await navigator.clipboard.writeText($('cd-env').textContent);
+    $('cd-copy').textContent = '✓ Copied';
+    setTimeout(() => { $('cd-copy').textContent = 'Copy Env Block'; }, 1500);
   } catch {}
 }
 async function setStatus(id, status) {

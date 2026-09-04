@@ -38,7 +38,8 @@ import { hasPrivateKey, getPrivateKeySource, getKeyFileHint } from './keys';
 import { publicKeyFingerprint, deriveEmbedState, deriveSetupPill } from './setup-status';
 import { sendWebhook } from './webhooks';
 import { provisionCloudDatabase, ProvisionResult } from './provision-cloud';
-import { HOSTED_MACHINE_ID } from './licensing/core';
+import { readTenantSummary } from './tenant-summary';
+import { HOSTED_MACHINE_ID, normalizeMachineId } from './licensing/core';
 
 dotenv.config();
 
@@ -517,6 +518,76 @@ async function handle(req: Req, res: Res) {
       if (method === 'POST' && relMatch) {
         await svc.releaseActivation(relMatch[1]);
         return sendJson(res, 200, { success: true });
+      }
+
+      // GET /api/cloud-customers/:licenseId — read back what onboarding produced.
+      // The Create Cloud Customer result is shown once; this rebuilds the same
+      // environment block afterwards from stored state so an operator who closed
+      // the dialog is not stuck re-provisioning to recover it.
+      //
+      // Read-only by design. It reports the admin USERNAME but never a password:
+      // only the bcrypt hash is stored, so no endpoint can return one.
+      const cloudGetMatch = p.match(/^\/api\/cloud-customers\/([^/]+)$/);
+      if (method === 'GET' && cloudGetMatch) {
+        if (session.role !== 'admin')
+          return sendJson(res, 403, { success: false, error: 'Admin role required.' });
+
+        const license = await svc.getLicense(cloudGetMatch[1]);
+        if (!license) return sendJson(res, 404, { success: false, error: 'Licence not found.' });
+
+        const cfg = await svc.getCloudConfig(license.id);
+        if (!cfg)
+          return sendJson(res, 404, {
+            success: false,
+            error: 'This licence has no provisioned cloud database.',
+          });
+
+        // The token shown is the one the customer is actually running, read from
+        // their activation row. Minting a fresh one here would record a new
+        // activation on every view and quietly inflate the seat count.
+        const activations = await svc.listActivations(license.id);
+        const hosted = activations.find(
+          (a: any) => normalizeMachineId(a.machine_id) === normalizeMachineId(HOSTED_MACHINE_ID)
+        );
+
+        const serverUrl = process.env.PUBLIC_SERVER_URL;
+        const data: any = {
+          license: { id: license.id, product_key: license.product_key, edition: license.edition },
+          env: {
+            DB_HOST: cfg.host,
+            DB_PORT: String(cfg.port),
+            DB_USER: cfg.user,
+            DB_PASSWORD: cfg.password,
+            DB_NAME: cfg.name,
+            DB_SSL: 'true',
+            LICENSE_KEY: hosted?.signed_license || '<no hosted token issued yet>',
+            LICENSE_SERVER_URL: serverUrl || '<SET PUBLIC_SERVER_URL ON THE LICENCE SERVER>',
+          },
+          admin: null,
+          seeded: null,
+        };
+        if (!serverUrl) {
+          data.env_warning =
+            'PUBLIC_SERVER_URL is not set on this licence server — fill in LICENSE_SERVER_URL by hand before pasting.';
+        }
+        if (!hosted) {
+          data.token_warning =
+            'No hosted activation found for this licence, so LICENSE_KEY is a placeholder. Re-run provisioning to mint one.';
+        }
+
+        // Read the tenant's own users/lookup tables so the operator can see
+        // whether it was seeded. A tenant that is unreachable is reported as
+        // such rather than failing the whole request — the env block above is
+        // still what they came for.
+        try {
+          const t = await readTenantSummary(cfg);
+          data.admin = t.admin;
+          data.seeded = t.seeded;
+        } catch (e) {
+          data.tenant_error = 'Could not read the tenant database: ' + (e as Error).message;
+        }
+
+        return sendJson(res, 200, { success: true, data });
       }
 
       // POST /api/cloud-customers — admin-only onboarding orchestration: create

@@ -649,6 +649,42 @@
     </div>
   </div>
 
+  <!-- Cloud details: read back an existing cloud customer's env block and admin -->
+  <div class="drawer-overlay" id="cloud-details-modal" onclick="if(event.target===this)closeModal('cloud-details-modal')">
+    <div class="drawer" style="width:560px">
+      <div class="drawer-head">
+        <div class="ic" style="background:rgba(56,189,248,.15)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#7dd3fc" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+        </div>
+        <div><h3>Cloud Details</h3><p id="cd-sub">Environment block and administrator</p></div>
+        <button class="x" onclick="closeModal('cloud-details-modal')">✕</button>
+      </div>
+      <div class="drawer-body">
+        <div id="cd-err" class="err"></div>
+        <div id="cd-loading" class="muted" style="font-size:13px">Reading tenant database…</div>
+        <div id="cd-content" style="display:none">
+          <div id="cd-warnings"></div>
+          <label>Railway environment variables</label>
+          <div class="keyout"><pre id="cd-env" style="white-space:pre-wrap;word-break:break-all;margin:0;font-size:12px"></pre></div>
+
+          <div style="margin-top:16px">
+            <label>Administrator login</label>
+            <div id="cd-admin"></div>
+          </div>
+
+          <div style="margin-top:16px">
+            <label>Seeded lookup tables</label>
+            <div id="cd-seeded" style="font-size:12px"></div>
+          </div>
+        </div>
+      </div>
+      <div class="drawer-foot">
+        <button class="btn" onclick="closeModal('cloud-details-modal')">Close</button>
+        <button class="btn" id="cd-copy" style="display:none" onclick="copyCloudDetailsEnv()">Copy Env Block</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Reset confirmation modal -->
   <div class="drawer-overlay" id="reset-modal" onclick="if(event.target===this)closeModal('reset-modal')">
     <div class="drawer" style="width:420px">
