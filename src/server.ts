@@ -597,6 +597,11 @@ async function handle(req: Req, res: Res) {
             LICENSE_KEY: data.token.signedLicense,
             LICENSE_SERVER_URL: serverUrl || '<SET PUBLIC_SERVER_URL ON THE LICENCE SERVER>',
           };
+
+          // Shown once. The plaintext password is never stored, and is empty
+          // when provisioning found an admin already present.
+          data.admin = prov.admin;
+          data.seeded = prov.seeded;
         }
 
         return sendJson(res, 200, { success: true, data });

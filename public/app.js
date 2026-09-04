@@ -694,6 +694,7 @@ function openCloudCustomerModal() {
   $('cc-err').classList.remove('show');
   $('cc-steps').innerHTML = '';
   $('cc-env-wrap').style.display = 'none';
+  $('cc-admin-block').style.display = 'none';
   $('cc-copy').style.display = 'none';
   $('cc-submit').style.display = '';
   show('cloud-customer-modal');
@@ -800,6 +801,16 @@ async function submitCloudCustomer() {
     $('cc-env-wrap').style.display = '';
     $('cc-copy').style.display = '';
     $('cc-submit').style.display = 'none';
+  }
+
+  // password is empty when provisioning found an admin already present (a
+  // re-provision / backfill) — an empty credential box would misleadingly
+  // imply the password itself is "".
+  if (d.admin && d.admin.password) {
+    $('cc-admin').textContent = `Username: ${d.admin.username}\nPassword: ${d.admin.password}`;
+    $('cc-admin-block').style.display = '';
+  } else {
+    $('cc-admin-block').style.display = 'none';
   }
 
   loadLicenses();
