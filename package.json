@@ -11,6 +11,7 @@
     "reset-admin": "tsx src/reset-admin.ts",
     "server": "tsx src/server.ts",
     "provision-cloud": "tsx src/provision-cloud.ts",
+    "seed-ref-db": "tsx src/seed-ref-db.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

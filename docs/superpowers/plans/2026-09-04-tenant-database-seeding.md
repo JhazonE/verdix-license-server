@@ -965,7 +965,14 @@ the `MySQL` service in the `Vendix_Pos` Railway project. Read it with
 `railway variables --service MySQL --kv | grep MYSQL_PUBLIC_URL` and pass it on
 the command line rather than committing it.
 
+`seed-ref-db.ts` does not load `dotenv`, and the local `.env` ships the `CLOUD_PROVISION_*` values blank — they live only on the Railway service. Pass both sets explicitly:
+
 ```bash
+CLOUD_PROVISION_HOST=metro.proxy.rlwy.net \
+CLOUD_PROVISION_PORT=35275 \
+CLOUD_PROVISION_USER=root \
+CLOUD_PROVISION_PASSWORD='<from railway>' \
+CLOUD_PROVISION_REF_DB=verdix_ref \
 SEED_MASTER_HOST=reseau.proxy.rlwy.net \
 SEED_MASTER_PORT=25746 \
 SEED_MASTER_USER=root \
@@ -985,11 +992,34 @@ Expected after: `tables: 84 migrations rows: 118`
 
 Re-provisioning an existing database is the idempotent path: `CREATE TABLE IF NOT EXISTS`, duplicate-FK tolerance, and `INSERT IGNORE` mean nothing existing is disturbed.
 
-```bash
-npm run provision-cloud -- --product-key VRDX-M2BN-5326-6GBY
+**Do not use `npm run provision-cloud` here.** Its `main()` prints only `dbName` and `dbUser` — it does **not** print the generated admin password, which is never stored and never regenerated, so running the CLI would create the admin and discard the only copy of its credential. (Its flag is also `--license`, not `--product-key`.) Call the function directly instead, from a throwaway script at the repo root:
+
+```typescript
+// backfill-tmp.ts — delete after running
+import { provisionCloudDatabase } from './src/provision-cloud';
+(async () => {
+  const res = await provisionCloudDatabase('VRDX-M2BN-5326-6GBY');
+  console.log('database :', res.dbName);
+  console.log('seeded   :', JSON.stringify(res.seeded));
+  console.log('admin    :', res.admin.username);
+  console.log('password :', res.admin.password || '(existing admin — unchanged)');
+  process.exit(0);
+})().catch((e) => { console.error('FAILED:', e.message); process.exit(1); });
 ```
 
-Expected: seeding and admin-creation lines in the output, ending with the generated admin credentials. **Record the password — it is shown once.**
+Provisioning needs four `CLOUD_PROVISION_*` variables **plus `CLOUD_CONFIG_SECRET`** (it encrypts the tenant DB password before storing it). The local `.env` ships these blank — the real values live only on the `verdix-license-server` Railway service, so read them with `railway variables --service verdix-license-server --kv` and pass them on the command line:
+
+```bash
+CLOUD_CONFIG_SECRET='<from railway>' \
+CLOUD_PROVISION_HOST=metro.proxy.rlwy.net \
+CLOUD_PROVISION_PORT=35275 \
+CLOUD_PROVISION_USER=root \
+CLOUD_PROVISION_PASSWORD='<from railway>' \
+CLOUD_PROVISION_REF_DB=verdix_ref \
+npx tsx backfill-tmp.ts
+```
+
+Expected: seeding and admin-creation lines, then the result block. **Record the password — it is shown once.** Delete `backfill-tmp.ts` afterwards.
 
 - [ ] **Step 5: Verify the tenant is usable**
 

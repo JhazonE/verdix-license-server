@@ -599,6 +599,17 @@ async function handle(req: Req, res: Res) {
           };
         }
 
+        if (prov) {
+          // Shown once. The plaintext password is never stored, and is empty
+          // when provisioning found an admin already present. Set whenever
+          // provisioning succeeded, regardless of the token outcome: it is
+          // never regenerated on a later run (an existing admin returns an
+          // empty password), so gating this on token success as well would
+          // let a token failure permanently discard the only copy.
+          data.admin = prov.admin;
+          data.seeded = prov.seeded;
+        }
+
         return sendJson(res, 200, { success: true, data });
       }
 
