@@ -62,9 +62,18 @@ npm run server      # → http://localhost:4100
 **Dashboard → Customers → Create Cloud Customer** onboards a hosted-web
 customer in one action: it issues a **licence**, **provisions their cloud
 database** on Railway (schema cloned from the reference DB, scoped user
-created), and **mints a hosted signed token** — then hands you a ready-to-paste
-Railway environment block (`DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`,
-`LICENSE_KEY`, ...) for that customer's deployment.
+created, lookup tables seeded, admin user created), and **mints a hosted signed
+token** — then hands you a ready-to-paste Railway environment block (`DB_HOST`,
+`DB_USER`, `DB_PASSWORD`, `DB_NAME`, `LICENSE_KEY`, ...) for that customer's
+deployment, plus the **administrator login**.
+
+> **The admin password is shown once.** Only its bcrypt hash is stored, and it
+> is never regenerated — a later provisioning run finds the existing admin and
+> returns an empty password. Copy it when it appears.
+
+See **[docs/cloud-tenancy.md](docs/cloud-tenancy.md)** for how tenant databases
+are laid out, how to run provisioning by hand, and two places the live setup
+departs from the model — read it before moving a customer between databases.
 
 - **Admin only.** The `POST /api/cloud-customers` endpoint enforces
   `session.role === 'admin'` — provisioning uses admin MySQL credentials that
