@@ -12,6 +12,7 @@ import crypto from 'crypto';
 import mysql from 'mysql2/promise';
 import { getLicenseByProductKey, getCloudConfig, upsertCloudConfig, addLicenseFeature } from './service';
 import { copySeedRows } from './seed-ref-db';
+import { createTenantAdmin, TenantAdmin } from './tenant-admin';
 
 export function deriveTenantNames(licenseId: string): { dbName: string; dbUser: string } {
   const short = crypto.createHash('sha256').update(licenseId).digest('hex').slice(0, 10);
@@ -34,6 +35,8 @@ export interface ProvisionResult {
   port: number;
   /** Lookup table -> rows inserted during seeding. */
   seeded: Record<string, number>;
+  /** The tenant's first administrator. `password` is empty if one already existed. */
+  admin: TenantAdmin;
 }
 
 /**
@@ -83,6 +86,7 @@ export async function provisionCloudDatabase(
 
   const refDb = process.env.CLOUD_PROVISION_REF_DB || 'verdix'; // reference schema source (local master)
   let seeded: Record<string, number> = {};
+  let tenantAdmin: TenantAdmin = { username: '', password: '' };
 
   const license = await getLicenseByProductKey(productKey);
   if (!license) throw new Error(`No license found for product key ${productKey}`);
@@ -186,6 +190,13 @@ export async function provisionCloudDatabase(
     seeded = await copySeedRows(copy, refDb, dbName);
     const seededTotal = Object.values(seeded).reduce((a, b) => a + b, 0);
     console.log(`  seeded ${seededTotal} rows across ${Object.keys(seeded).length} lookup tables`);
+
+    // The admin lands after seeding because user_type references a role name
+    // that seeding puts in place.
+    tenantAdmin = await createTenantAdmin(copy, dbName);
+    console.log(tenantAdmin.password
+      ? `  admin user '${tenantAdmin.username}' created`
+      : `  admin user '${tenantAdmin.username}' already existed, left unchanged`);
   } finally {
     await copy.end();
   }
@@ -195,7 +206,7 @@ export async function provisionCloudDatabase(
   });
   await addLicenseFeature(license.id, 'cloud-sync');
 
-  return { dbName, dbUser, password, host: admin.host, port: admin.port, seeded };
+  return { dbName, dbUser, password, host: admin.host, port: admin.port, seeded, admin: tenantAdmin };
 }
 
 async function main() {
