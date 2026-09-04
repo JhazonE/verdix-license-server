@@ -55,9 +55,12 @@ function generatePassword(): string {
 
 /**
  * Insert one administrator into `dbName`. Idempotent: if the username already
- * exists the existing row is left untouched and its username is returned with
- * an empty password, signalling to the caller that no new credential was
- * minted (re-provisioning must not silently rotate a working login).
+ * exists the existing row is left untouched (its password is never rotated)
+ * and its username is returned with an empty password, signalling to the
+ * caller that no new credential was minted. Permissions are reconciled on
+ * EVERY run, for both the new-user and already-exists paths, via
+ * `INSERT IGNORE` — so if a prior run crashed after creating the user row but
+ * before inserting its permissions, simply re-running this repairs it.
  */
 export async function createTenantAdmin(
   conn: mysql.Connection,
@@ -69,20 +72,24 @@ export async function createTenantAdmin(
   const [existing] = await conn.query<any[]>(
     `SELECT uid FROM \`${dbName}\`.users WHERE username = ?`, [username]
   );
+
+  let uid: string;
+  let password = '';
+
   if (existing.length) {
-    return { username, password: '' };
+    uid = existing[0].uid;
+  } else {
+    password = generatePassword();
+    const hash = await bcrypt.hash(password, 10);
+    uid = crypto.randomUUID();
+
+    await conn.query(
+      `INSERT INTO \`${dbName}\`.users
+         (uid, username, display_name, disabled, password, user_type, created_at, updated_at)
+       VALUES (?, ?, ?, 0, ?, ?, NOW(), NOW())`,
+      [uid, username, 'Administrator', hash, ADMIN_ROLE_NAME]
+    );
   }
-
-  const password = generatePassword();
-  const hash = await bcrypt.hash(password, 10);
-  const uid = crypto.randomUUID();
-
-  await conn.query(
-    `INSERT INTO \`${dbName}\`.users
-       (uid, username, display_name, disabled, password, user_type, created_at, updated_at)
-     VALUES (?, ?, ?, 0, ?, ?, NOW(), NOW())`,
-    [uid, username, 'Administrator', hash, ADMIN_ROLE_NAME]
-  );
 
   const rows = ADMIN_PERMISSIONS.map((p) => [crypto.randomUUID(), uid, p]);
   await conn.query(

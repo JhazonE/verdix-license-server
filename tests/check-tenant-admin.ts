@@ -63,6 +63,28 @@ async function main() {
   const [after]: any = await conn.query(`SELECT COUNT(*) n FROM \`${DB}\`.users`);
   if (after[0].n !== 1) fail(`re-run created a second admin: ${after[0].n} users`);
 
+  // Regression guard for the repair path (FIX 2): a crash between the two
+  // INSERTs used to leave an admin with zero permissions that re-running
+  // provisioning could never fix, because the early-return fired before the
+  // permission insert was ever reached. Simulate that damaged state by
+  // deleting the permission rows, then confirm a plain re-run of
+  // createTenantAdmin reconciles them back — the existing-user path must
+  // also run the permission insert, not just the new-user path.
+  await conn.query(`DELETE FROM \`${DB}\`.user_permissions WHERE user_uid = ?`, [rows[0]?.uid]);
+  const [wiped]: any = await conn.query(
+    `SELECT COUNT(*) n FROM \`${DB}\`.user_permissions WHERE user_uid = ?`, [rows[0]?.uid]
+  );
+  if (wiped[0].n !== 0) fail(`setup for repair-path check failed: ${wiped[0].n} permissions still present`);
+
+  const repaired = await createTenantAdmin(conn, DB);
+  if (repaired.password !== '') fail(`repair run must not mint a new password, got "${repaired.password}"`);
+  const [restored]: any = await conn.query(
+    `SELECT permission FROM \`${DB}\`.user_permissions WHERE user_uid = ?`, [rows[0]?.uid]
+  );
+  if (restored.length !== 13) fail(`repair run should restore 13 permissions, got ${restored.length}`);
+  const [afterRepair]: any = await conn.query(`SELECT COUNT(*) n FROM \`${DB}\`.users`);
+  if (afterRepair[0].n !== 1) fail(`repair run created a second admin: ${afterRepair[0].n} users`);
+
   await conn.query(`DROP DATABASE IF EXISTS \`${DB}\``);
   await conn.end();
   console.log(failed ? '❌ FAILED' : '✅ PASS');

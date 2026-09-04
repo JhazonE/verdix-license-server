@@ -20,7 +20,7 @@
  * a single call, so `multipleStatements` is not required for them.
  */
 import mysql from 'mysql2/promise';
-import { SEED_TABLES } from './seed-tables';
+import { SEED_TABLES, DEFAULT_REF_DB } from './seed-tables';
 
 /**
  * Clone any base table `masterDb` has that `refDb` lacks, SAME-SERVER, via
@@ -100,7 +100,7 @@ export async function copySeedRows(
 }
 
 async function main() {
-  const refDb = process.env.CLOUD_PROVISION_REF_DB || 'verdix_ref';
+  const refDb = process.env.CLOUD_PROVISION_REF_DB || DEFAULT_REF_DB;
   const masterHost = process.env.SEED_MASTER_HOST;
   const masterDb = process.env.SEED_MASTER_DB || 'verdix';
 

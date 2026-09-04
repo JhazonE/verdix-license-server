@@ -22,3 +22,12 @@ export const SEED_TABLES: readonly string[] = [
   'accounts',
   'sales_areas',
 ] as const;
+
+/**
+ * Default reference database provisioning clones from, and that seed-ref-db.ts
+ * curates. Defined once because the two must never disagree: if provisioning
+ * fell back to the live POS master while the operator script curated a
+ * different database, a new tenant would be seeded with another customer's
+ * production data.
+ */
+export const DEFAULT_REF_DB = 'verdix_ref';

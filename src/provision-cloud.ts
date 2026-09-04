@@ -13,6 +13,7 @@ import mysql from 'mysql2/promise';
 import { getLicenseByProductKey, getCloudConfig, upsertCloudConfig, addLicenseFeature } from './service';
 import { copySeedRows } from './seed-ref-db';
 import { createTenantAdmin, TenantAdmin } from './tenant-admin';
+import { DEFAULT_REF_DB } from './seed-tables';
 
 export function deriveTenantNames(licenseId: string): { dbName: string; dbUser: string } {
   const short = crypto.createHash('sha256').update(licenseId).digest('hex').slice(0, 10);
@@ -84,7 +85,7 @@ export async function provisionCloudDatabase(
   };
   if (!admin.host || !admin.user) throw new Error('Set CLOUD_PROVISION_HOST/PORT/USER/PASSWORD (Railway admin creds).');
 
-  const refDb = process.env.CLOUD_PROVISION_REF_DB || 'verdix'; // reference schema source (local master)
+  const refDb = process.env.CLOUD_PROVISION_REF_DB || DEFAULT_REF_DB; // reference schema source (curated by seed-ref-db.ts)
   let seeded: Record<string, number> = {};
   let tenantAdmin: TenantAdmin = { username: '', password: '' };
 
