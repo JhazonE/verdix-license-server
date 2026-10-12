@@ -86,7 +86,7 @@ export interface TableDrift {
  * This exists because comparing table NAMES is not enough. A migration that
  * adds a column to an existing table leaves the table list identical, so the
  * schema repair below found nothing to do and reported success while the
- * reference database stayed stale. That is how `verdix_ref` fell 19 migrations
+ * reference database stayed stale. That is how `verdix_ref` fell 23 migrations
  * behind without anyone noticing, and why a provisioned tenant was missing
  * `sale_items.selling_unit_factor` — provisioning clones the reference
  * database, so a gap here reaches every customer created afterwards.
@@ -291,8 +291,8 @@ async function main() {
     // Step 1 only adds MISSING TABLES. A migration that adds a column to an
     // existing table leaves the table list identical, so step 1 reports
     // "0 table(s) added" and the reference database silently stays stale —
-    // which is exactly how it fell 19 migrations behind and shipped tenants
-    // without `sale_items.selling_unit_factor`.
+    // which is exactly how it fell 23 migrations behind (33 columns across 12
+    // tables) and shipped tenants without `sale_items.selling_unit_factor`.
     //
     // `diffColumns` takes ONE connection, but here the master and the
     // reference database are on different servers, so the master's column
