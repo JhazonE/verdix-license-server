@@ -672,9 +672,31 @@ async function saveLicense() {
   if (!res.success) { err.textContent = res.error; err.classList.add('show'); return; }
   closeModal('license-modal');
   loadLicenses();
+  // Reset the hosted block first: the modal is reused, and a stale token from a
+  // previous customer must never show under a new licence.
+  $('issued-hosted-wrap').style.display = 'none';
+  $('issued-hosted').textContent = '';
+  $('issued-hosted-err').style.display = 'none';
+  $('issued-hosted-err').textContent = '';
+  $('issued-hosted-copy').textContent = 'Copy Hosted Key';
   $('issued-product-key').textContent = res.data.product_key;
   $('issued-copy-btn').textContent = 'Copy Key';
   show('license-issued-modal');
+  if (res.data.hostedLicenseKey) {
+    $('issued-hosted').textContent = res.data.hostedLicenseKey;
+    $('issued-hosted-wrap').style.display = 'block';
+  }
+  if (res.data.hostedTokenError) {
+    $('issued-hosted-err').textContent = 'Hosted key could not be created: ' + res.data.hostedTokenError;
+    $('issued-hosted-err').style.display = 'block';
+  }
+}
+async function copyIssuedHostedKey() {
+  try {
+    await navigator.clipboard.writeText($('issued-hosted').textContent);
+    $('issued-hosted-copy').textContent = '✓ Copied';
+    setTimeout(() => $('issued-hosted-copy').textContent = 'Copy Hosted Key', 1500);
+  } catch {}
 }
 async function copyIssuedKey() {
   try {

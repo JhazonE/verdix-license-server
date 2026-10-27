@@ -586,7 +586,15 @@
       <div class="drawer-body">
         <p class="muted" style="margin:0 0 18px;font-size:13px">Give this product key to the customer for online activation, or click <strong>Generate Key</strong> to make an offline machine-bound key.</p>
         <label>Product Key</label>
+        <p class="muted" style="margin:0 0 6px;font-size:12px">Goes in the <strong>POS activation form</strong>. The POS activates itself and receives a key bound to that machine.</p>
         <div class="keyout"><code id="issued-product-key" style="font-size:15px;letter-spacing:.5px;word-break:break-all"></code></div>
+        <div id="issued-hosted-wrap" style="display:none;margin-top:20px">
+          <label>Hosted License Key</label>
+          <p class="muted" style="margin:0 0 6px;font-size:12px">Goes in the customer's <strong>Railway service</strong> as the <code>LICENSE_KEY</code> variable. Do <strong>not</strong> paste it into the POS activation form &mdash; it is not bound to a machine and the POS will reject it.</p>
+          <div class="keyout"><pre id="issued-hosted" style="white-space:pre-wrap;word-break:break-all;margin:0;font-size:12px"></pre></div>
+          <button class="btn ghost" id="issued-hosted-copy" onclick="copyIssuedHostedKey()" style="margin-top:8px">Copy Hosted Key</button>
+        </div>
+        <div id="issued-hosted-err" class="err" style="display:none;margin-top:14px"></div>
       </div>
       <div class="drawer-foot">
         <button class="btn ghost" onclick="closeModal('license-issued-modal')">Close</button>
