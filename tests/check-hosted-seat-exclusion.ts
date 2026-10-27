@@ -50,7 +50,12 @@ for (const fn of ['countActiveActivations', 'listLicenses', 'dashboardStats']) {
   const counts = body.match(/COUNT\(\*\)[^`]*?FROM\s+activations[^`)]*/gi) ?? [];
   assert.ok(counts.length > 0, `${fn}: no COUNT(*) over activations found (test is stale)`);
   for (const c of counts) {
-    assert.ok(/machine_id/.test(c), `${fn}: activation count does not constrain machine_id: ${c}`);
+    // Require the real comparison: `machine_id <> '<HOSTED>'` (optionally alias-qualified),
+    // where <HOSTED> is the interpolated constant or its literal value.
+    const exclusion = new RegExp(
+      String.raw`\bmachine_id\s*<>\s*'(?:\$\{HOSTED_ACTIVATION_MACHINE_ID\}|${HOSTED_ACTIVATION_MACHINE_ID})'`
+    );
+    assert.ok(exclusion.test(c), `${fn}: activation count lacks machine_id <> '${HOSTED_ACTIVATION_MACHINE_ID}': ${c}`);
   }
 }
 
