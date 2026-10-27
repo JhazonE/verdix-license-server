@@ -64,6 +64,131 @@ export async function repairRefSchema(
   return created;
 }
 
+/** One column the reference database is missing, with the DDL to add it. */
+export interface MissingColumn {
+  name: string;
+  /** Column definition taken from the master, e.g. "DECIMAL(12,4) NULL". */
+  definition: string;
+  /** Column it sits after in the master, so ordering is preserved. */
+  after: string | null;
+}
+
+/** Per-table column drift between the reference database and the master. */
+export interface TableDrift {
+  table: string;
+  missing: MissingColumn[];
+}
+
+/**
+ * Report columns the master has that `refDb` lacks, for tables BOTH databases
+ * already have.
+ *
+ * This exists because comparing table NAMES is not enough. A migration that
+ * adds a column to an existing table leaves the table list identical, so the
+ * schema repair below found nothing to do and reported success while the
+ * reference database stayed stale. That is how `verdix_ref` fell 23 migrations
+ * behind without anyone noticing, and why a provisioned tenant was missing
+ * `sale_items.selling_unit_factor` — provisioning clones the reference
+ * database, so a gap here reaches every customer created afterwards.
+ *
+ * Only ADDITIVE drift is reported. A column present in the reference but not in
+ * the master is left alone: dropping it could destroy tenant data, and the
+ * reference database is allowed to run ahead of a master that is still one
+ * customer's production database (see docs/cloud-tenancy.md).
+ *
+ * Both databases must live on the same server as seen by `conn`.
+ */
+export async function diffColumns(
+  conn: mysql.Connection,
+  refDb: string,
+  masterDb: string
+): Promise<TableDrift[]> {
+  const columnsOf = async (db: string) => {
+    const [rows] = await conn.query<any[]>(
+      `SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA
+         FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ?
+        ORDER BY TABLE_NAME, ORDINAL_POSITION`, [db]
+    );
+    const byTable = new Map<string, any[]>();
+    for (const r of rows) {
+      if (!byTable.has(r.TABLE_NAME)) byTable.set(r.TABLE_NAME, []);
+      byTable.get(r.TABLE_NAME)!.push(r);
+    }
+    return byTable;
+  };
+
+  const [masterCols, refCols] = await Promise.all([columnsOf(masterDb), columnsOf(refDb)]);
+  const drift: TableDrift[] = [];
+
+  for (const [table, mCols] of masterCols) {
+    const rCols = refCols.get(table);
+    if (!rCols) continue; // table absent from ref entirely — the table-level repair owns that
+    const refHas = new Set(rCols.map((c) => c.COLUMN_NAME));
+
+    const missing: MissingColumn[] = [];
+    for (let i = 0; i < mCols.length; i++) {
+      const c = mCols[i];
+      if (refHas.has(c.COLUMN_NAME)) continue;
+
+      // Nullability and default reproduce the master's definition. A NOT NULL
+      // column with no default cannot be added to a table that already holds
+      // rows, so it is relaxed to NULL rather than failing the repair.
+      const parts = [c.COLUMN_TYPE];
+      const autoInc = /auto_increment/i.test(c.EXTRA || '');
+      if (c.IS_NULLABLE === 'NO' && c.COLUMN_DEFAULT === null && !autoInc) {
+        parts.push('NULL');
+      } else {
+        parts.push(c.IS_NULLABLE === 'NO' ? 'NOT NULL' : 'NULL');
+        if (c.COLUMN_DEFAULT !== null) {
+          // CURRENT_TIMESTAMP and numeric literals are expressions, not strings.
+          const d = String(c.COLUMN_DEFAULT);
+          const bare = /^(CURRENT_TIMESTAMP(\(\d*\))?|NULL|\d+(\.\d+)?)$/i.test(d);
+          parts.push(`DEFAULT ${bare ? d : conn.escape(d)}`);
+        }
+      }
+      if (/on update/i.test(c.EXTRA || '')) parts.push(c.EXTRA);
+
+      // Preserve position: the nearest earlier master column the ref also has.
+      let after: string | null = null;
+      for (let j = i - 1; j >= 0; j--) {
+        if (refHas.has(mCols[j].COLUMN_NAME)) { after = mCols[j].COLUMN_NAME; break; }
+      }
+
+      missing.push({ name: c.COLUMN_NAME, definition: parts.join(' '), after });
+    }
+
+    if (missing.length) drift.push({ table, missing });
+  }
+
+  return drift;
+}
+
+/**
+ * Apply the additive column drift `diffColumns` reports to `refDb`.
+ * Returns "table.column" for each column added. Idempotent: a second run finds
+ * no drift and applies nothing.
+ */
+export async function repairRefColumns(
+  conn: mysql.Connection,
+  refDb: string,
+  masterDb: string
+): Promise<string[]> {
+  const drift = await diffColumns(conn, refDb, masterDb);
+  const applied: string[] = [];
+
+  for (const { table, missing } of drift) {
+    // One ALTER per table: MySQL rewrites the table once, not once per column.
+    const clauses = missing.map((c) =>
+      `ADD COLUMN \`${c.name}\` ${c.definition}` + (c.after ? ` AFTER \`${c.after}\`` : '')
+    );
+    await conn.query(`ALTER TABLE \`${refDb}\`.\`${table}\` ${clauses.join(', ')}`);
+    for (const c of missing) applied.push(`${table}.${c.name}`);
+  }
+
+  return applied;
+}
+
 /**
  * Copy SEED_TABLES rows from `fromDb` into `toDb`, server-side. Returns
  * table -> rows inserted. `INSERT IGNORE` makes re-runs a no-op rather than a
@@ -160,6 +285,85 @@ async function main() {
       await ref.query('SET FOREIGN_KEY_CHECKS=1');
     }
     console.log(`Schema: ${missing.length} table(s) added to '${refDb}'${missing.length ? ': ' + missing.join(', ') : ''}`);
+
+    // 1b. Column repair on tables BOTH databases already have.
+    //
+    // Step 1 only adds MISSING TABLES. A migration that adds a column to an
+    // existing table leaves the table list identical, so step 1 reports
+    // "0 table(s) added" and the reference database silently stays stale —
+    // which is exactly how it fell 23 migrations behind (33 columns across 12
+    // tables) and shipped tenants without `sale_items.selling_unit_factor`.
+    //
+    // `diffColumns` takes ONE connection, but here the master and the
+    // reference database are on different servers, so the master's column
+    // metadata is read separately and compared in this process. Only additive
+    // drift is applied; a column the reference has and the master does not is
+    // left alone (dropping it could destroy tenant data).
+    const columnsOf = async (c: mysql.Connection, db: string) => {
+      const [rows] = await c.query<any[]>(
+        `SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA
+           FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ?
+          ORDER BY TABLE_NAME, ORDINAL_POSITION`, [db]
+      );
+      const byTable = new Map<string, any[]>();
+      for (const r of rows) {
+        if (!byTable.has(r.TABLE_NAME)) byTable.set(r.TABLE_NAME, []);
+        byTable.get(r.TABLE_NAME)!.push(r);
+      }
+      return byTable;
+    };
+
+    const [mCols, rCols] = await Promise.all([
+      columnsOf(master, masterDb),
+      columnsOf(ref, refDb),
+    ]);
+
+    const addedColumns: string[] = [];
+    await ref.query('SET FOREIGN_KEY_CHECKS=0');
+    try {
+      for (const [table, cols] of mCols) {
+        const refCols = rCols.get(table);
+        if (!refCols) continue; // newly created above, already matches the master
+        const refHas = new Set(refCols.map((c) => c.COLUMN_NAME));
+        const clauses: string[] = [];
+
+        for (let i = 0; i < cols.length; i++) {
+          const c = cols[i];
+          if (refHas.has(c.COLUMN_NAME)) continue;
+
+          const parts = [c.COLUMN_TYPE];
+          const autoInc = /auto_increment/i.test(c.EXTRA || '');
+          if (c.IS_NULLABLE === 'NO' && c.COLUMN_DEFAULT === null && !autoInc) {
+            parts.push('NULL'); // cannot add NOT NULL without a default to a populated table
+          } else {
+            parts.push(c.IS_NULLABLE === 'NO' ? 'NOT NULL' : 'NULL');
+            if (c.COLUMN_DEFAULT !== null) {
+              const d = String(c.COLUMN_DEFAULT);
+              const bare = /^(CURRENT_TIMESTAMP(\(\d*\))?|NULL|\d+(\.\d+)?)$/i.test(d);
+              parts.push(`DEFAULT ${bare ? d : ref.escape(d)}`);
+            }
+          }
+          if (/on update/i.test(c.EXTRA || '')) parts.push(c.EXTRA);
+
+          let after: string | null = null;
+          for (let j = i - 1; j >= 0; j--) {
+            if (refHas.has(cols[j].COLUMN_NAME)) { after = cols[j].COLUMN_NAME; break; }
+          }
+
+          clauses.push(
+            `ADD COLUMN \`${c.COLUMN_NAME}\` ${parts.join(' ')}` + (after ? ` AFTER \`${after}\`` : '')
+          );
+          addedColumns.push(`${table}.${c.COLUMN_NAME}`);
+        }
+
+        if (clauses.length) {
+          await ref.query(`ALTER TABLE \`${refDb}\`.\`${table}\` ${clauses.join(', ')}`);
+        }
+      }
+    } finally {
+      await ref.query('SET FOREIGN_KEY_CHECKS=1');
+    }
+    console.log(`Columns: ${addedColumns.length} added to existing table(s)${addedColumns.length ? ': ' + addedColumns.join(', ') : ''}`);
 
     // 2. Row copy: read each seed table out of the master, write into the ref DB.
     await ref.query('SET FOREIGN_KEY_CHECKS=0');
