@@ -676,7 +676,7 @@ async function saveLicense() {
   // previous customer must never show under a new licence.
   $('issued-hosted-wrap').style.display = 'none';
   $('issued-hosted').textContent = '';
-  $('issued-hosted-err').style.display = 'none';
+  $('issued-hosted-err').classList.remove('show');
   $('issued-hosted-err').textContent = '';
   $('issued-hosted-copy').textContent = 'Copy Hosted Key';
   $('issued-product-key').textContent = res.data.product_key;
@@ -688,7 +688,7 @@ async function saveLicense() {
   }
   if (res.data.hostedTokenError) {
     $('issued-hosted-err').textContent = 'Hosted key could not be created: ' + res.data.hostedTokenError;
-    $('issued-hosted-err').style.display = 'block';
+    $('issued-hosted-err').classList.add('show');
   }
 }
 async function copyIssuedHostedKey() {
