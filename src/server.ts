@@ -450,7 +450,22 @@ async function handle(req: Req, res: Res) {
           product_id: body.product_id,
           created_by: session.username,
         });
-        return sendJson(res, 200, { success: true, data: lic });
+        // Subscriptions also get a hosted token (Path B: pasted into the customer's
+        // LICENSE_KEY env var). Keys are added only when relevant, never as undefined.
+        const out: any = { ...lic };
+        if (lic.type === 'subscription') {
+          // The licence is already committed, so a mint failure must not fail the request.
+          try {
+            // Re-read: createLicense returns the in-memory object, which can lack
+            // features the committed row has. Signing it would mint a stale token.
+            const fresh = (await svc.getLicense(lic.id)) || lic;
+            const { signedLicense } = await svc.issueSignedLicense(fresh, HOSTED_MACHINE_ID, { record: true });
+            out.hostedLicenseKey = signedLicense;
+          } catch (e: any) {
+            out.hostedTokenError = e?.message || String(e);
+          }
+        }
+        return sendJson(res, 200, { success: true, data: out });
       }
 
       // /api/licenses/:id/(status|sign)
