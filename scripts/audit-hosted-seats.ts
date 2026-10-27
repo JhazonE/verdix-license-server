@@ -7,6 +7,10 @@
  * licences gains one seat. This script only lists them so the operator can
  * decide whether any max_activations needs adjusting. It never writes.
  *
+ * A licence only gains a seat in practice if it is status 'active' and not
+ * expired: the heartbeat path returns before any seat logic for revoked,
+ * suspended or expired licences (src/service.ts).
+ *
  *   npm run audit-hosted-seats
  */
 import { query } from '../src/db';
@@ -17,6 +21,7 @@ interface Row {
   business_name: string;
   license_status: string;
   max_activations: number;
+  expires_at: Date | string | null;
   other_active: number;
 }
 
@@ -26,6 +31,7 @@ async function main() {
             c.business_name,
             l.status AS license_status,
             l.max_activations,
+            l.expires_at,
             (SELECT COUNT(*) FROM activations a
               WHERE a.license_id = l.id
                 AND a.status = 'active'
@@ -44,26 +50,42 @@ async function main() {
     process.exit(0);
   }
 
+  const now = Date.now();
   const table = rows.map((r) => {
-    const n = Number(r.other_active);
+    const used = Number(r.other_active);
+    const max = Number(r.max_activations);
+    const expired = r.expires_at != null && new Date(r.expires_at).getTime() < now;
     return {
       product_key: r.product_key,
       business: r.business_name,
       license_status: r.license_status,
-      max_activations: Number(r.max_activations),
-      seats_before: n + 1,
-      seats_after: n,
+      expires_at: r.expires_at ? new Date(r.expires_at).toISOString().slice(0, 10) : '-',
+      max_activations: max,
+      used_before: used + 1,
+      used_after: used,
+      free_after: max - used,
+      _effective: r.license_status === 'active' && !expired,
     };
   });
 
+  const effective = table.filter((t) => t._effective);
+  const inert = table.filter((t) => !t._effective);
+  const display = table.map(({ _effective, ...rest }) => rest);
+
   console.log('\nLicences holding an active HOSTED activation (read-only):\n');
-  console.table(table);
+  console.log('used_before counts the HOSTED row; used_after excludes it; free_after = max_activations - used_after.\n');
+  console.table(display);
 
   console.log(
-    `\nSummary: ${rows.length} licence(s) gain a seat when the change is deployed` +
-      ' (seats_before counts the HOSTED row; seats_after excludes it).' +
-      ' No data was modified.\n'
+    `\nSummary: ${effective.length} active, unexpired licence(s) gain a seat when the change is deployed.`
   );
+  if (inert.length) {
+    console.log(
+      `         ${inert.length} other licence(s) are also listed but have no practical effect` +
+        ' (revoked, suspended or expired; the heartbeat returns before seat logic).'
+    );
+  }
+  console.log('         No data was modified.\n');
   process.exit(0);
 }
 
