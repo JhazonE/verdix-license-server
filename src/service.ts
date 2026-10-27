@@ -28,6 +28,7 @@ import {
   cachePutActivation,
   cacheReleaseActivation,
   CachedLicense,
+  HOSTED_ACTIVATION_MACHINE_ID,
 } from './cache';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -251,7 +252,7 @@ export async function getLicenseByProductKey(productKey: string): Promise<Licens
 export async function listLicenses(): Promise<any[]> {
   const rows = await query<any[]>(
     `SELECT l.*, c.business_name,
-            (SELECT COUNT(*) FROM activations a WHERE a.license_id = l.id AND a.status = 'active') AS active_count
+            (SELECT COUNT(*) FROM activations a WHERE a.license_id = l.id AND a.status = 'active' AND a.machine_id <> '${HOSTED_ACTIVATION_MACHINE_ID}') AS active_count
        FROM licenses l
        JOIN customers c ON c.id = l.customer_id
        ORDER BY l.created_at DESC`
@@ -403,7 +404,7 @@ export async function issueSignedLicense(
 export async function countActiveActivations(licenseId: string): Promise<number> {
   try {
     const rows = await query<any[]>(
-      `SELECT COUNT(*) AS n FROM activations WHERE license_id = ? AND status = 'active'`,
+      `SELECT COUNT(*) AS n FROM activations WHERE license_id = ? AND status = 'active' AND machine_id <> '${HOSTED_ACTIVATION_MACHINE_ID}'`,
       [licenseId]
     );
     return Number(rows[0]?.n || 0);
@@ -698,7 +699,7 @@ export async function importBackup(
 export async function dashboardStats(): Promise<any> {
   const [c] = await query<any[]>(`SELECT COUNT(*) AS n FROM customers`);
   const [l] = await query<any[]>(`SELECT COUNT(*) AS n FROM licenses`);
-  const [a] = await query<any[]>(`SELECT COUNT(*) AS n FROM activations WHERE status = 'active'`);
+  const [a] = await query<any[]>(`SELECT COUNT(*) AS n FROM activations WHERE status = 'active' AND machine_id <> '${HOSTED_ACTIVATION_MACHINE_ID}'`);
   const [r] = await query<any[]>(`SELECT COUNT(*) AS n FROM licenses WHERE status = 'revoked'`);
   return {
     customers: Number(c.n),

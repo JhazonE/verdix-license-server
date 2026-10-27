@@ -41,6 +41,9 @@ export interface CachedActivation {
   last_seen_at: string | null;
 }
 
+/** machine_id of the synthetic activation a hosted tenant uses; it never consumes a seat. */
+export const HOSTED_ACTIVATION_MACHINE_ID = 'HOSTED';
+
 // ── Internal stores ────────────────────────────────────────────────────────
 const _licenseById  = new Map<string, CachedLicense>();
 const _licenseByKey = new Map<string, CachedLicense>(); // keyed by product_key (upper)
@@ -66,7 +69,7 @@ export function getCachedActivation(licenseId: string, machineId: string): Cache
 export function countCachedActiveActivations(licenseId: string): number {
   let n = 0;
   for (const a of _activations.values()) {
-    if (a.license_id === licenseId && a.status === 'active') n++;
+    if (a.license_id === licenseId && a.status === 'active' && a.machine_id !== HOSTED_ACTIVATION_MACHINE_ID) n++;
   }
   return n;
 }
