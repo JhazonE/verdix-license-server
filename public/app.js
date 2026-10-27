@@ -25,6 +25,151 @@ function setCount(id, shown, total) {
   if (el) el.textContent = shown === total ? `(${total})` : `(${shown} of ${total})`;
 }
 
+// ── Table sorting + pagination ────────────────────────────────────────────────
+// Every data table sorts and pages the rows already in its cache, the same
+// place matchesQuery filters them, so none of this needs a new endpoint.
+// One entry per table, keyed by the table name used in the element ids.
+const tableState = {};
+
+/** Sort/page state for a table, created on first use. */
+function tState(name) {
+  if (!tableState[name]) tableState[name] = { sortKey: null, sortDir: null, page: 1, perPage: 10 };
+  return tableState[name];
+}
+
+/**
+ * Click cycle on a column header: ascending, then descending, then back to the
+ * order the server sent. Any re-sort returns to page 1, otherwise you land on
+ * a page whose rows have nothing to do with where you were.
+ */
+function sortBy(name, key, rerender) {
+  const s = tState(name);
+  if (s.sortKey !== key) { s.sortKey = key; s.sortDir = 'asc'; }
+  else if (s.sortDir === 'asc') { s.sortDir = 'desc'; }
+  else { s.sortKey = null; s.sortDir = null; }
+  s.page = 1;
+  window[rerender]();
+}
+function setPage(name, page, rerender) {
+  tState(name).page = page;
+  window[rerender]();
+}
+function setPerPage(name, value, rerender) {
+  const s = tState(name);
+  s.perPage = value === 'all' ? 'all' : parseInt(value, 10);
+  s.page = 1;
+  window[rerender]();
+}
+/** Searching or filtering changes which rows exist, so it also resets the page. */
+function resetPage(name, rerender) {
+  tState(name).page = 1;
+  window[rerender]();
+}
+
+/**
+ * Sort rows by the active column. Values are compared as text with numeric
+ * collation, so "10" sorts after "9" and dates in YYYY-MM-DD order sort
+ * chronologically. Blanks sort last in both directions — an empty cell is
+ * missing data, not the smallest value.
+ */
+function sortRows(name, rows, accessors) {
+  const s = tState(name);
+  if (!s.sortKey) return rows;
+  const get = accessors[s.sortKey];
+  if (!get) return rows;
+  const dir = s.sortDir === 'desc' ? -1 : 1;
+  return rows.slice().sort((a, b) => {
+    const av = get(a), bv = get(b);
+    const ae = av == null || av === '';
+    const be = bv == null || bv === '';
+    if (ae || be) return ae && be ? 0 : ae ? 1 : -1;
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+    return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' }) * dir;
+  });
+}
+
+/** The slice of rows on the current page, with the page clamped into range. */
+function pageRows(name, rows) {
+  const s = tState(name);
+  const size = s.perPage === 'all' ? Math.max(rows.length, 1) : s.perPage;
+  const totalPages = Math.max(1, Math.ceil(rows.length / size));
+  // Rows can disappear under us (a delete, a tighter search), so a page number
+  // that is now past the end falls back to the last page that still has rows.
+  if (s.page > totalPages) s.page = totalPages;
+  const start = (s.page - 1) * size;
+  return { rows: rows.slice(start, start + size), page: s.page, totalPages, size, start, total: rows.length };
+}
+
+/**
+ * One <th> for a sortable column. The header is a real <button> inside the th
+ * with aria-sort on it, so it is reachable by Tab and announced with its
+ * direction; th-sort styles the arrow.
+ */
+function sortTh(name, key, label, rerender, attrs = '') {
+  const s = tState(name);
+  const active = s.sortKey === key;
+  const aria = active ? (s.sortDir === 'desc' ? 'descending' : 'ascending') : 'none';
+  const next = !active ? 'ascending' : s.sortDir === 'asc' ? 'descending' : 'the default order';
+  const rot = active && s.sortDir === 'desc' ? ' style="transform:rotate(180deg)"' : '';
+  return `<th scope="col" aria-sort="${aria}"${attrs ? ' ' + attrs : ''}>
+    <button type="button" class="th-sort" onclick="sortBy('${name}','${key}','${rerender}')" title="Sort by ${esc(label)} — ${next}">
+      <span>${esc(label)}</span>
+      <svg class="th-arrow" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"${rot}><path d="M6 15l6-6 6 6"/></svg>
+    </button>
+  </th>`;
+}
+
+/**
+ * The pagination footer: rows-per-page (the max rows on one page), the range
+ * being shown out of the filtered total, the numbered pages, and the page
+ * count — ceil(filtered rows / rows per page).
+ */
+function pagerHtml(name, p, rerender) {
+  const s = tState(name);
+  const per = s.perPage === 'all' ? 'all' : String(s.perPage);
+  const opts = ['10', '25', '50', '100', 'all']
+    .map((v) => `<option value="${v}"${v === per ? ' selected' : ''}>${v === 'all' ? 'All' : v}</option>`)
+    .join('');
+
+  // First, last, and the current page with one neighbour either side; the gaps
+  // between become ellipses, so the footer never outgrows its row.
+  const nums = [];
+  for (let n = 1; n <= p.totalPages; n++) {
+    if (n === 1 || n === p.totalPages || Math.abs(n - p.page) <= 1) nums.push(n);
+    else if (nums[nums.length - 1] !== 'gap') nums.push('gap');
+  }
+  const buttons = nums.map((n) => n === 'gap'
+    ? '<span class="pg-gap" aria-hidden="true">…</span>'
+    : `<button type="button" class="pg" onclick="setPage('${name}',${n},'${rerender}')"${n === p.page ? ' aria-current="page"' : ''} aria-label="${n === p.page ? `Page ${n}, current page` : `Go to page ${n}`}">${n}</button>`
+  ).join('');
+
+  const range = p.total
+    ? `Showing ${p.start + 1}–${Math.min(p.start + p.size, p.total)} of ${p.total}${s.perPage === 'all' ? ' rows' : ` rows · max ${p.size} per page`}`
+    : 'No rows to show';
+
+  const arrow = (label, target, disabled, path) =>
+    `<button type="button" class="pg" onclick="setPage('${name}',${target},'${rerender}')"${disabled ? ' disabled' : ''} aria-label="${label}">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="${path}"/></svg>
+    </button>`;
+
+  return `<div class="pager">
+    <div class="pager-per">
+      <label for="${name}-per">Rows per page</label>
+      <select id="${name}-per" onchange="setPerPage('${name}',this.value,'${rerender}')">${opts}</select>
+    </div>
+    <p class="pager-range">${range}</p>
+    <div class="pager-spacer"></div>
+    <nav class="pager-nav" aria-label="Pages">
+      ${arrow('First page', 1, p.page <= 1, 'M18 17l-5-5 5-5M11 17l-5-5 5-5')}
+      ${arrow('Previous page', p.page - 1, p.page <= 1, 'M15 18l-6-6 6-6')}
+      ${buttons}
+      ${arrow('Next page', p.page + 1, p.page >= p.totalPages, 'M9 18l6-6-6-6')}
+      ${arrow('Last page', p.totalPages, p.page >= p.totalPages, 'M6 17l5-5-5-5M13 17l5-5-5-5')}
+    </nav>
+    <p class="pager-count">Page ${p.page} of ${p.totalPages}</p>
+  </div>`;
+}
+
 // ── Toast notifications ───────────────────────────────────────────────────────
 function toast(message, type = 'info', title = '') {
   const icons = {
@@ -168,11 +313,24 @@ function renderCustomers() {
   const el = $('customers-table');
   if (!customersCache.length) { setCount('customers-count', 0, 0); el.innerHTML = '<div class="empty">No customers yet. Click "New Customer".</div>'; return; }
   const q = val('customers-search');
-  const data = customersCache.filter((c) => matchesQuery(c, ['business_name', 'contact_name', 'email', 'phone'], q));
-  setCount('customers-count', data.length, customersCache.length);
-  if (!data.length) { el.innerHTML = '<div class="empty">No customers match your search.</div>'; return; }
-  el.innerHTML = `<table><thead><tr><th>Business</th><th>Contact</th><th>Email</th><th>Phone</th><th>Licenses</th><th>Added</th></tr></thead><tbody>${
-    data.map((c) => `<tr>
+  const filtered = customersCache.filter((c) => matchesQuery(c, ['business_name', 'contact_name', 'email', 'phone'], q));
+  setCount('customers-count', filtered.length, customersCache.length);
+  if (!filtered.length) { el.innerHTML = '<div class="empty">No customers match your search.</div>'; return; }
+  const sorted = sortRows('customers', filtered, {
+    business_name: (c) => c.business_name,
+    contact_name: (c) => c.contact_name,
+    email: (c) => c.email,
+    phone: (c) => c.phone,
+    license_count: (c) => Number(c.license_count) || 0,
+    created_at: (c) => c.created_at,
+  });
+  const p = pageRows('customers', sorted);
+  const th = (key, label) => sortTh('customers', key, label, 'renderCustomers');
+  el.innerHTML = `<div class="table-scroll"><table><thead><tr>${
+    th('business_name', 'Business') + th('contact_name', 'Contact') + th('email', 'Email') +
+    th('phone', 'Phone') + th('license_count', 'Licenses') + th('created_at', 'Added')
+  }</tr></thead><tbody>${
+    p.rows.map((c) => `<tr>
       <td><strong>${esc(c.business_name)}</strong></td>
       <td>${esc(c.contact_name) || '—'}</td>
       <td>${esc(c.email) || '—'}</td>
@@ -180,7 +338,7 @@ function renderCustomers() {
       <td>${c.license_count}</td>
       <td>${fmtDate(c.created_at)}</td>
     </tr>`).join('')
-  }</tbody></table>`;
+  }</tbody></table></div>${pagerHtml('customers', p, 'renderCustomers')}`;
 }
 function openCustomerModal() {
   ['c-business','c-contact','c-phone','c-email','c-address','c-notes'].forEach(id => document.getElementById(id).value = '');
@@ -218,11 +376,26 @@ function renderProducts() {
   if (!el) return;
   if (!productsCache.length) { setCount('products-count', 0, 0); el.innerHTML = '<div class="empty">No products yet. Click "New Product".</div>'; return; }
   const q = val('products-search');
-  const data = productsCache.filter((p) => matchesQuery(p, ['name', 'id', 'key_prefix', 'license_prefix', 'env_key_name'], q));
-  setCount('products-count', data.length, productsCache.length);
-  if (!data.length) { el.innerHTML = '<div class="empty">No products match your search.</div>'; return; }
-  el.innerHTML = `<table><thead><tr><th></th><th>Name</th><th>ID</th><th>Key Prefix</th><th>License Prefix</th><th>Env Var</th><th>Public Key</th><th>Setup</th></tr></thead><tbody>${
-    data.map((p) => {
+  const filtered = productsCache.filter((p) => matchesQuery(p, ['name', 'id', 'key_prefix', 'license_prefix', 'env_key_name'], q));
+  setCount('products-count', filtered.length, productsCache.length);
+  if (!filtered.length) { el.innerHTML = '<div class="empty">No products match your search.</div>'; return; }
+  const sorted = sortRows('products', filtered, {
+    name: (p) => p.name,
+    id: (p) => p.id,
+    key_prefix: (p) => p.key_prefix,
+    license_prefix: (p) => p.license_prefix,
+    env_key_name: (p) => p.env_key_name,
+    public_key: (p) => (p.public_key ? 'present' : 'missing'),
+  });
+  // Each product renders as two <tr>s (the row and its setup detail), so the
+  // page is sliced over products, not over table rows.
+  const pg = pageRows('products', sorted);
+  const th = (key, label) => sortTh('products', key, label, 'renderProducts');
+  el.innerHTML = `<div class="table-scroll"><table><thead><tr><th></th>${
+    th('name', 'Name') + th('id', 'ID') + th('key_prefix', 'Key Prefix') +
+    th('license_prefix', 'License Prefix') + th('env_key_name', 'Env Var') + th('public_key', 'Public Key')
+  }<th>Setup</th></tr></thead><tbody>${
+    pg.rows.map((p) => {
       const expanded = expandedProducts.has(p.id);
       const cached = setupCache[p.id];
       return `<tr class="expandable" onclick="toggleProductSetup('${esc(p.id)}')">
@@ -239,7 +412,7 @@ function renderProducts() {
     </tr>
     <tr class="detail${expanded ? '' : ' hidden'}" id="detail-${esc(p.id)}"><td colspan="8"><div id="setup-${esc(p.id)}">${expanded && cached ? renderSetupPanel(cached) : ''}</div></td></tr>`;
     }).join('')
-  }</tbody></table>`;
+  }</tbody></table></div>${pagerHtml('products', pg, 'renderProducts')}`;
 }
 // ── New Product: derive everything from the name ──────────────────────────────
 // Registering a product used to mean inventing four values by hand (id, two
@@ -412,12 +585,15 @@ async function toggleProductSetup(id) {
 
 async function loadProductSetup(id) {
   const res = await api('/api/products/' + encodeURIComponent(id) + '/setup');
+  // The product can leave the page while this is in flight (another page of the
+  // table, a search), so the panel may be gone by the time the answer lands.
+  const panel = $('setup-' + id);
   if (!res.success) {
-    $('setup-' + id).innerHTML = `<div class="setup"><span class="muted">${esc(res.error || 'Could not load setup status.')}</span></div>`;
+    if (panel) panel.innerHTML = `<div class="setup"><span class="muted">${esc(res.error || 'Could not load setup status.')}</span></div>`;
     return;
   }
   setupCache[id] = res.data;
-  $('setup-' + id).innerHTML = renderSetupPanel(res.data);
+  if (panel) panel.innerHTML = renderSetupPanel(res.data);
   renderSetupPill(id, res.data.pill);
 }
 
@@ -608,13 +784,30 @@ function renderLicenses() {
   if (!licensesCache.length) { setCount('licenses-count', 0, 0); el.innerHTML = '<div class="empty">No licenses yet. Click "Issue License".</div>'; return; }
   const q = val('licenses-search');
   const productFilter = val('licenses-product-filter');
-  const data = licensesCache
+  const filtered = licensesCache
     .filter((l) => !productFilter || l.product_id === productFilter)
     .filter((l) => matchesQuery(l, ['product_key', 'business_name', 'edition', 'status', 'type', 'product_id'], q));
-  setCount('licenses-count', data.length, licensesCache.length);
-  if (!data.length) { el.innerHTML = '<div class="empty">No licenses match your search.</div>'; return; }
-  el.innerHTML = `<table><thead><tr><th>Product Key</th><th>Product</th><th>Customer</th><th>Edition</th><th>Type</th><th>Expires</th><th>Computers</th><th>Status</th><th></th></tr></thead><tbody>${
-    data.map((l) => `<tr>
+  setCount('licenses-count', filtered.length, licensesCache.length);
+  if (!filtered.length) { el.innerHTML = '<div class="empty">No licenses match your search.</div>'; return; }
+  const sorted = sortRows('licenses', filtered, {
+    product_key: (l) => l.product_key,
+    product_id: (l) => productName(l.product_id),
+    business_name: (l) => l.business_name,
+    edition: (l) => l.edition,
+    type: (l) => l.type,
+    // Perpetual licences have no expiry date; sortRows puts those blanks last.
+    expires_at: (l) => (l.type === 'subscription' ? l.expires_at : null),
+    active_count: (l) => Number(l.active_count) || 0,
+    status: (l) => l.status,
+  });
+  const p = pageRows('licenses', sorted);
+  const th = (key, label) => sortTh('licenses', key, label, 'renderLicenses');
+  el.innerHTML = `<div class="table-scroll"><table><thead><tr>${
+    th('product_key', 'Product Key') + th('product_id', 'Product') + th('business_name', 'Customer') +
+    th('edition', 'Edition') + th('type', 'Type') + th('expires_at', 'Expires') +
+    th('active_count', 'Computers') + th('status', 'Status')
+  }<th></th></tr></thead><tbody>${
+    p.rows.map((l) => `<tr>
       <td><code class="key">${esc(l.product_key)}</code></td>
       <td>${esc(productName(l.product_id))}</td>
       <td>${esc(l.business_name)}</td>
@@ -633,7 +826,7 @@ function renderLicenses() {
           : `<button class="btn sm ghost" onclick="setStatus('${l.id}','active')">Reactivate</button>`}
       </td>
     </tr>`).join('')
-  }</tbody></table>`;
+  }</tbody></table></div>${pagerHtml('licenses', p, 'renderLicenses')}`;
 }
 function toggleExpiry() {
   $('l-expiry-wrap').classList.toggle('hidden', val('l-type') !== 'subscription');
@@ -971,11 +1164,26 @@ function renderActivations() {
   const el = $('activations-table');
   if (!activationsCache.length) { setCount('activations-count', 0, 0); el.innerHTML = '<div class="empty">No activations yet.</div>'; return; }
   const q = val('activations-search');
-  const data = activationsCache.filter((a) => matchesQuery(a, ['business_name', 'product_key', 'machine_id', 'machine_label', 'status'], q));
-  setCount('activations-count', data.length, activationsCache.length);
-  if (!data.length) { el.innerHTML = '<div class="empty">No activations match your search.</div>'; return; }
-  el.innerHTML = `<table><thead><tr><th>Customer</th><th>Product Key</th><th>Machine</th><th>Label</th><th>Status</th><th>Last Seen</th><th>Activated</th><th></th></tr></thead><tbody>${
-    data.map((a) => `<tr>
+  const filtered = activationsCache.filter((a) => matchesQuery(a, ['business_name', 'product_key', 'machine_id', 'machine_label', 'status'], q));
+  setCount('activations-count', filtered.length, activationsCache.length);
+  if (!filtered.length) { el.innerHTML = '<div class="empty">No activations match your search.</div>'; return; }
+  const sorted = sortRows('activations', filtered, {
+    business_name: (a) => a.business_name,
+    product_key: (a) => a.product_key,
+    machine_id: (a) => a.machine_id,
+    machine_label: (a) => a.machine_label,
+    status: (a) => a.status,
+    last_seen_at: (a) => a.last_seen_at,
+    activated_at: (a) => a.activated_at,
+  });
+  const p = pageRows('activations', sorted);
+  const th = (key, label) => sortTh('activations', key, label, 'renderActivations');
+  el.innerHTML = `<div class="table-scroll"><table><thead><tr>${
+    th('business_name', 'Customer') + th('product_key', 'Product Key') + th('machine_id', 'Machine') +
+    th('machine_label', 'Label') + th('status', 'Status') + th('last_seen_at', 'Last Seen') +
+    th('activated_at', 'Activated')
+  }<th></th></tr></thead><tbody>${
+    p.rows.map((a) => `<tr>
       <td>${esc(a.business_name)}</td>
       <td><code class="key">${esc(a.product_key)}</code></td>
       <td><code class="key">${esc(a.machine_id).slice(0,20)}…</code></td>
@@ -987,7 +1195,7 @@ function renderActivations() {
       <td>${fmtDate(a.activated_at)}</td>
       <td>${a.status === 'active' ? `<button class="btn sm danger" onclick="release('${a.id}')">Release</button>` : ''}</td>
     </tr>`).join('')
-  }</tbody></table>`;
+  }</tbody></table></div>${pagerHtml('activations', p, 'renderActivations')}`;
 }
 async function release(id) {
   openConfirm({
@@ -1016,11 +1224,21 @@ function renderUsers() {
   const el = $('users-table');
   if (!usersCache.length) { setCount('users-count', 0, 0); el.innerHTML = '<div class="empty">No users yet.</div>'; return; }
   const q = val('users-search');
-  const data = usersCache.filter((u) => matchesQuery(u, ['username', 'role'], q));
-  setCount('users-count', data.length, usersCache.length);
-  if (!data.length) { el.innerHTML = '<div class="empty">No users match your search.</div>'; return; }
-  el.innerHTML = `<table><thead><tr><th>Username</th><th>Role</th><th>Created</th><th>Last Login</th><th></th></tr></thead><tbody>${
-    data.map((u) => `<tr>
+  const filtered = usersCache.filter((u) => matchesQuery(u, ['username', 'role'], q));
+  setCount('users-count', filtered.length, usersCache.length);
+  if (!filtered.length) { el.innerHTML = '<div class="empty">No users match your search.</div>'; return; }
+  const sorted = sortRows('users', filtered, {
+    username: (u) => u.username,
+    role: (u) => u.role,
+    created_at: (u) => u.created_at,
+    last_login_at: (u) => u.last_login_at,
+  });
+  const p = pageRows('users', sorted);
+  const th = (key, label) => sortTh('users', key, label, 'renderUsers');
+  el.innerHTML = `<div class="table-scroll"><table><thead><tr>${
+    th('username', 'Username') + th('role', 'Role') + th('created_at', 'Created') + th('last_login_at', 'Last Login')
+  }<th></th></tr></thead><tbody>${
+    p.rows.map((u) => `<tr>
       <td><strong>${esc(u.username)}</strong></td>
       <td><span class="pill perpetual">${esc(u.role)}</span></td>
       <td>${fmtDate(u.created_at)}</td>
@@ -1031,7 +1249,7 @@ function renderUsers() {
         <button class="btn sm danger" onclick="deleteUser('${u.id}','${esc(u.username)}')">Delete</button>
       </td>
     </tr>`).join('')
-  }</tbody></table>`;
+  }</tbody></table></div>${pagerHtml('users', p, 'renderUsers')}`;
 }
 function openUserModal() {
   editUserId = null;
