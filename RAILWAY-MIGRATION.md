@@ -20,6 +20,7 @@ Also copy:
 
 - [ ] `LICENSE_ADMIN_SECRET` — HMAC secret for dashboard sessions. Changing it just logs admins out; not fatal, but keep it the same to avoid surprises.
 - [ ] `LICENSE_DB_HOST`, `LICENSE_DB_PORT`, `LICENSE_DB_USER`, `LICENSE_DB_PASSWORD`, `LICENSE_DB_NAME`, `LICENSE_DB_SSL`
+
 > Cloud provisioning was removed on 2026-10-27; `CLOUD_PROVISION_*` and `CLOUD_CONFIG_SECRET` are no longer read, so do not copy them.
 
 > **Note on DB vars:** `db.ts` falls back `LICENSE_DB_*` → `CLOUD_DB_*` → `DB_*` → `localhost`. If the old service relied on `CLOUD_DB_*` or `DB_*` instead of `LICENSE_DB_*`, copy those too — or better, set the explicit `LICENSE_DB_*` names on the new service so the fallback never matters.
