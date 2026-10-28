@@ -28,6 +28,7 @@ import {
   cachePutActivation,
   cacheReleaseActivation,
   CachedLicense,
+  HOSTED_ACTIVATION_MACHINE_ID,
 } from './cache';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -251,7 +252,7 @@ export async function getLicenseByProductKey(productKey: string): Promise<Licens
 export async function listLicenses(): Promise<any[]> {
   const rows = await query<any[]>(
     `SELECT l.*, c.business_name,
-            (SELECT COUNT(*) FROM activations a WHERE a.license_id = l.id AND a.status = 'active') AS active_count
+            (SELECT COUNT(*) FROM activations a WHERE a.license_id = l.id AND a.status = 'active' AND a.machine_id <> '${HOSTED_ACTIVATION_MACHINE_ID}') AS active_count
        FROM licenses l
        JOIN customers c ON c.id = l.customer_id
        ORDER BY l.created_at DESC`
@@ -287,38 +288,6 @@ export async function addLicenseFeature(licenseId: string, feature: string): Pro
   await query(`UPDATE licenses SET features = ? WHERE id = ?`, [JSON.stringify(features), licenseId]);
   cacheUpdateLicenseStatus(licenseId, license.status); // keep cache warm; status unchanged
   await log(licenseId, null, 'license.feature.added', feature);
-}
-
-// ── Cloud Config (per-license multi-tenant DB storage) ────────────────────────
-export interface CloudConfig {
-  host: string;
-  port: number;
-  name: string;
-  user: string;
-  password: string;
-}
-
-export async function upsertCloudConfig(licenseId: string, cfg: CloudConfig): Promise<void> {
-  const { encryptDbPassword } = await import('./cloud-config-crypto');
-  await query(
-    `INSERT INTO cloud_configs (license_id, db_host, db_port, db_name, db_user, db_password_enc)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE
-       db_host = VALUES(db_host), db_port = VALUES(db_port), db_name = VALUES(db_name),
-       db_user = VALUES(db_user), db_password_enc = VALUES(db_password_enc)`,
-    [licenseId, cfg.host, cfg.port, cfg.name, cfg.user, encryptDbPassword(cfg.password)]
-  );
-  await log(licenseId, null, 'cloud.config.saved', `Cloud DB ${cfg.name}`);
-}
-
-export async function getCloudConfig(licenseId: string): Promise<CloudConfig | null> {
-  const rows = await query<any[]>(`SELECT * FROM cloud_configs WHERE license_id = ?`, [licenseId]);
-  const r = rows[0];
-  if (!r) return null;
-  const { decryptDbPassword } = await import('./cloud-config-crypto');
-  const password = decryptDbPassword(r.db_password_enc);
-  if (password === null) return null;
-  return { host: r.db_host, port: Number(r.db_port), name: r.db_name, user: r.db_user, password };
 }
 
 // ── Signing (machine binding) ────────────────────────────────────────────────
@@ -403,7 +372,7 @@ export async function issueSignedLicense(
 export async function countActiveActivations(licenseId: string): Promise<number> {
   try {
     const rows = await query<any[]>(
-      `SELECT COUNT(*) AS n FROM activations WHERE license_id = ? AND status = 'active'`,
+      `SELECT COUNT(*) AS n FROM activations WHERE license_id = ? AND status = 'active' AND machine_id <> '${HOSTED_ACTIVATION_MACHINE_ID}'`,
       [licenseId]
     );
     return Number(rows[0]?.n || 0);
@@ -698,7 +667,7 @@ export async function importBackup(
 export async function dashboardStats(): Promise<any> {
   const [c] = await query<any[]>(`SELECT COUNT(*) AS n FROM customers`);
   const [l] = await query<any[]>(`SELECT COUNT(*) AS n FROM licenses`);
-  const [a] = await query<any[]>(`SELECT COUNT(*) AS n FROM activations WHERE status = 'active'`);
+  const [a] = await query<any[]>(`SELECT COUNT(*) AS n FROM activations WHERE status = 'active' AND machine_id <> '${HOSTED_ACTIVATION_MACHINE_ID}'`);
   const [r] = await query<any[]>(`SELECT COUNT(*) AS n FROM licenses WHERE status = 'revoked'`);
   return {
     customers: Number(c.n),

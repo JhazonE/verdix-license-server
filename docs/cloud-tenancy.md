@@ -1,3 +1,11 @@
+> **Historical document. Cloud database provisioning was removed on 2026-10-27.**
+>
+> This describes tenant databases (`verdix_c_*`, `verdix_ref`) and `cloud_configs` rows that
+> **still physically exist** in the operator's MySQL instance but are **no longer created, read or
+> managed by the licence server**. It is retained so they can be decommissioned by hand. See
+> [docs/superpowers/specs/2026-10-27-remove-cloud-db-provisioning-design.md](superpowers/specs/2026-10-27-remove-cloud-db-provisioning-design.md).
+> Commands and endpoints mentioned below (`provision-cloud`, `POST /api/cloud-customers`) no longer exist.
+
 # Cloud tenancy: how a hosted customer's database is laid out
 
 How **Create Cloud Customer** provisions a database, which databases exist on the shared MySQL

@@ -114,6 +114,8 @@ const TABLES: { name: string; sql: string }[] = [
     `,
   },
   {
+    // Retained for historical rows from the provisioning era (removed 2026-10-27).
+    // No longer read or written; do not drop.
     name: 'cloud_configs',
     sql: `
       CREATE TABLE IF NOT EXISTS cloud_configs (
