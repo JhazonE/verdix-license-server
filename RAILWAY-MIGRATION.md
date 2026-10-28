@@ -20,8 +20,7 @@ Also copy:
 
 - [ ] `LICENSE_ADMIN_SECRET` — HMAC secret for dashboard sessions. Changing it just logs admins out; not fatal, but keep it the same to avoid surprises.
 - [ ] `LICENSE_DB_HOST`, `LICENSE_DB_PORT`, `LICENSE_DB_USER`, `LICENSE_DB_PASSWORD`, `LICENSE_DB_NAME`, `LICENSE_DB_SSL`
-- [ ] `CLOUD_PROVISION_HOST`, `CLOUD_PROVISION_PORT`, `CLOUD_PROVISION_USER`, `CLOUD_PROVISION_PASSWORD`, `CLOUD_PROVISION_REF_DB` (only if you use cloud provisioning)
-- [ ] `CLOUD_CONFIG_SECRET` (only if you use cloud provisioning)
+> Cloud provisioning was removed on 2026-10-27; `CLOUD_PROVISION_*` and `CLOUD_CONFIG_SECRET` are no longer read, so do not copy them.
 
 > **Note on DB vars:** `db.ts` falls back `LICENSE_DB_*` → `CLOUD_DB_*` → `DB_*` → `localhost`. If the old service relied on `CLOUD_DB_*` or `DB_*` instead of `LICENSE_DB_*`, copy those too — or better, set the explicit `LICENSE_DB_*` names on the new service so the fallback never matters.
 >
@@ -53,7 +52,6 @@ Paste in everything captured in Step 0.
 - [ ] `LICENSE_PRIVATE_KEY` — paste the PEM exactly. Multi-line values are fine in Railway's variable editor.
 - [ ] `LICENSE_ADMIN_SECRET`
 - [ ] `LICENSE_DB_HOST` / `LICENSE_DB_PORT` / `LICENSE_DB_USER` / `LICENSE_DB_PASSWORD` / `LICENSE_DB_NAME` / `LICENSE_DB_SSL`
-- [ ] `CLOUD_PROVISION_*` and `CLOUD_CONFIG_SECRET` — only if used
 - [ ] **Per-product signing keys** — one variable per product, named by that product's
       `env_key_name` (e.g. `LICENSE_PRIVATE_KEY_MYAPP`). `verdix-pos` uses
       `LICENSE_PRIVATE_KEY`, so the original variable is unchanged.
