@@ -142,8 +142,8 @@ If `LICENSE_DB_*` is unset it uses `CLOUD_DB_*` (Railway), then `DB_*` (local).
 
 ## Deploy to Railway
 
-1. Deploy this server (start command: `npx tsx license-server/server.ts`, or
-   precompile). Point it at a Railway MySQL service.
+1. Deploy this server (start command: `npx tsx src/server.ts`, matching the
+   `Dockerfile`'s `CMD`, or precompile). Point it at a Railway MySQL service.
 2. Set env vars: `LICENSE_DB_*` (or `CLOUD_DB_*`), `LICENSE_ADMIN_SECRET`, and
    `LICENSE_PRIVATE_KEY` (paste the contents of `keys/private-key.pem`).
 3. `npm run migrate` + `npm run seed-admin` once against it.
