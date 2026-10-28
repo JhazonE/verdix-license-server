@@ -290,38 +290,6 @@ export async function addLicenseFeature(licenseId: string, feature: string): Pro
   await log(licenseId, null, 'license.feature.added', feature);
 }
 
-// ── Cloud Config (per-license multi-tenant DB storage) ────────────────────────
-export interface CloudConfig {
-  host: string;
-  port: number;
-  name: string;
-  user: string;
-  password: string;
-}
-
-export async function upsertCloudConfig(licenseId: string, cfg: CloudConfig): Promise<void> {
-  const { encryptDbPassword } = await import('./cloud-config-crypto');
-  await query(
-    `INSERT INTO cloud_configs (license_id, db_host, db_port, db_name, db_user, db_password_enc)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE
-       db_host = VALUES(db_host), db_port = VALUES(db_port), db_name = VALUES(db_name),
-       db_user = VALUES(db_user), db_password_enc = VALUES(db_password_enc)`,
-    [licenseId, cfg.host, cfg.port, cfg.name, cfg.user, encryptDbPassword(cfg.password)]
-  );
-  await log(licenseId, null, 'cloud.config.saved', `Cloud DB ${cfg.name}`);
-}
-
-export async function getCloudConfig(licenseId: string): Promise<CloudConfig | null> {
-  const rows = await query<any[]>(`SELECT * FROM cloud_configs WHERE license_id = ?`, [licenseId]);
-  const r = rows[0];
-  if (!r) return null;
-  const { decryptDbPassword } = await import('./cloud-config-crypto');
-  const password = decryptDbPassword(r.db_password_enc);
-  if (password === null) return null;
-  return { host: r.db_host, port: Number(r.db_port), name: r.db_name, user: r.db_user, password };
-}
-
 // ── Signing (machine binding) ────────────────────────────────────────────────
 /**
  * Build + sign a machine-bound license from a license record. Used by BOTH the

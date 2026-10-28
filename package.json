@@ -11,8 +11,6 @@
     "reset-admin": "tsx src/reset-admin.ts",
     "audit-hosted-seats": "tsx scripts/audit-hosted-seats.ts",
     "server": "tsx src/server.ts",
-    "provision-cloud": "tsx src/provision-cloud.ts",
-    "seed-ref-db": "tsx src/seed-ref-db.ts",
     "test": "for f in tests/check-*.ts; do echo \"— $f\"; npx tsx \"$f\" || exit 1; done",
     "typecheck": "tsc --noEmit"
   },
