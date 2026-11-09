@@ -139,6 +139,72 @@ export async function getCustomer(id: string): Promise<Customer | null> {
 }
 
 // ── Licenses ─────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve the value to store in `licenses.expires_at` for a given licence type.
+ *
+ * This is the SINGLE place that decides a licence's expiry, because three call
+ * sites previously each did it differently and only one was correct:
+ *   - offline-cli.ts appended 'T23:59:59'               → right
+ *   - the dashboard's cloud modal sent an ISO instant    → 8h adrift
+ *   - createLicense() parsed a bare date as UTC midnight → a full day early
+ *
+ * Two rules, both of which caused live incidents:
+ *
+ * 1. A perpetual licence NEVER carries an expiry. Callers that spread a raw
+ *    request body (`{ ...body }`) could previously hand us `type:'perpetual'`
+ *    alongside a leftover `expires_at` and we would store it, producing a
+ *    "perpetual" licence that expired. Perpetual always wins; the date is
+ *    dropped.
+ *
+ * 2. A subscription expires at the END of the chosen day (23:59:59), in a fixed
+ *    wall clock that does not move with the server's timezone. `expires_at` is
+ *    a MySQL DATETIME with no zone, so we format the literal wall clock we want
+ *    stored rather than going through toISOString() — which would bake in the
+ *    reading server's UTC offset and make a dev box and Railway disagree by 8
+ *    hours on the same row.
+ */
+export function normalizeExpiry(
+  type: LicenseType,
+  expiresAt?: string | null
+): string | null {
+  // Rule 1: perpetual licences have no expiry, whatever the caller passed.
+  if (type !== 'subscription') return null;
+
+  if (!expiresAt) {
+    throw new Error('Subscription licenses require an expiry date.');
+  }
+
+  const raw = String(expiresAt).trim();
+
+  // Rule 2: take the intended CALENDAR DAY, then pin it to end-of-day.
+  //
+  // A bare 'YYYY-MM-DD' is used as written — `new Date('2027-12-31')` would
+  // parse it as midnight UTC, which is what killed licences a day early.
+  // A full timestamp is reduced to the day its author meant: an ISO instant
+  // with a 'Z' is converted to the local wall clock first, because that is the
+  // day the admin picked in the date field before the browser serialized it.
+  const bare = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  let y: number, m: number, d: number;
+
+  if (bare) {
+    y = Number(bare[1]);
+    m = Number(bare[2]);
+    d = Number(bare[3]);
+  } else {
+    const parsed = new Date(raw);
+    if (isNaN(parsed.getTime())) {
+      throw new Error(`Invalid expiry date: "${raw}" (use YYYY-MM-DD).`);
+    }
+    y = parsed.getFullYear();
+    m = parsed.getMonth() + 1;
+    d = parsed.getDate();
+  }
+
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${y}-${pad(m)}-${pad(d)} 23:59:59`;
+}
+
 export async function createLicense(input: {
   customer_id: string;
   product_id?: string;
@@ -152,13 +218,18 @@ export async function createLicense(input: {
 }): Promise<License> {
   const id = crypto.randomUUID();
 
-  if (input.type === 'subscription' && !input.expires_at) {
-    throw new Error('Subscription licenses require an expiry date.');
+  // Both HTTP callers build their input with `{ ...body }`, so `type` arrives
+  // straight from the request. Require it explicitly rather than letting an
+  // absent or misspelled value fall through to a silent default — a licence
+  // that silently became a subscription is exactly how cloud-onboarded stores
+  // ended up with a time bomb.
+  if (input.type !== 'perpetual' && input.type !== 'subscription') {
+    throw new Error(
+      `License type must be "perpetual" or "subscription" (received ${JSON.stringify(input.type)}).`
+    );
   }
-  const expires =
-    input.type === 'subscription' && input.expires_at
-      ? new Date(input.expires_at).toISOString().slice(0, 19).replace('T', ' ')
-      : null;
+
+  const expires = normalizeExpiry(input.type, input.expires_at);
 
   const productId = (input.product_id || DEFAULT_PRODUCT_ID).trim();
   const product = await getProduct(productId);
