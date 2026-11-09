@@ -828,6 +828,17 @@ function renderLicenses() {
 function toggleExpiry() {
   $('l-expiry-wrap').classList.toggle('hidden', val('l-type') !== 'subscription');
 }
+/**
+ * Format a Date as the local 'YYYY-MM-DD' calendar day.
+ *
+ * Deliberately NOT toISOString().slice(0,10): near midnight that reports the
+ * UTC day, which from UTC+8 is still yesterday — so a "30 day" licence could
+ * be stored a day short. The server pins the returned day to 23:59:59.
+ */
+function localDateStr(d) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 function openLicenseModal() {
   if (!customersCache.length) {
     toast('Please create a customer first before issuing a license.', 'warning', 'No Customers');
@@ -854,7 +865,7 @@ async function saveLicense() {
   };
   if (type === 'subscription') {
     if (val('l-expires')) body.expires_at = val('l-expires');
-    else if (val('l-days')) body.expires_at = new Date(Date.now() + parseInt(val('l-days'), 10) * 86400000).toISOString();
+    else if (val('l-days')) body.expires_at = localDateStr(new Date(Date.now() + parseInt(val('l-days'), 10) * 86400000));
   }
   const err = $('l-err');
   if (type === 'subscription' && !body.expires_at) { err.textContent = 'Set a duration or expiry date.'; err.classList.add('show'); return; }

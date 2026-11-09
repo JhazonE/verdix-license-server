@@ -49,6 +49,13 @@ export function getPool(): mysql.Pool {
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
+    // DATETIME columns carry no timezone. Without this, mysql2 converts them
+    // using the READING process's local offset, so the same licences.expires_at
+    // row came back 8 hours apart on a UTC+8 dev box and on Railway (UTC) — and
+    // because validateHeartbeat re-signs on every poll, the expiry baked into
+    // the licence token moved with whichever server answered. Pinning to 'Z'
+    // makes a stored wall clock read back as the same wall clock everywhere.
+    timezone: 'Z',
     ...(useSsl ? { ssl: { rejectUnauthorized: false } } : {}),
   });
 
