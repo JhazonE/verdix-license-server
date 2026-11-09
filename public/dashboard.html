@@ -667,8 +667,15 @@
           Set this to the number of tills the store actually runs — leaving it at 1
           blocks them from adding a second till.
         </p>
-        <label>Expiry date</label>
-        <input id="cc-expires" type="date">
+        <label>License type</label>
+        <select id="cc-type" onchange="toggleCloudExpiry()">
+          <option value="perpetual">Perpetual</option>
+          <option value="subscription">Subscription</option>
+        </select>
+        <div id="cc-expiry-wrap" class="hidden">
+          <label>Expiry date</label>
+          <input id="cc-expires" type="date">
+        </div>
         <label>Features (comma separated)</label>
         <input id="cc-features" value="cloud-sync">
         <label style="display:flex;align-items:center;gap:8px;margin-top:14px">

@@ -831,6 +831,21 @@ function renderLicenses() {
 function toggleExpiry() {
   $('l-expiry-wrap').classList.toggle('hidden', val('l-type') !== 'subscription');
 }
+/** Same show/hide for the cloud-onboarding modal's own type selector. */
+function toggleCloudExpiry() {
+  $('cc-expiry-wrap').classList.toggle('hidden', val('cc-type') !== 'subscription');
+}
+/**
+ * Format a Date as the local 'YYYY-MM-DD' calendar day.
+ *
+ * Deliberately NOT toISOString().slice(0,10): near midnight that reports the
+ * UTC day, which from UTC+8 is still yesterday — so a "30 day" licence could be
+ * stored a day short. The server pins the returned day to 23:59:59.
+ */
+function localDateStr(d) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 function openLicenseModal() {
   if (!customersCache.length) {
     toast('Please create a customer first before issuing a license.', 'warning', 'No Customers');
@@ -857,7 +872,7 @@ async function saveLicense() {
   };
   if (type === 'subscription') {
     if (val('l-expires')) body.expires_at = val('l-expires');
-    else if (val('l-days')) body.expires_at = new Date(Date.now() + parseInt(val('l-days'), 10) * 86400000).toISOString();
+    else if (val('l-days')) body.expires_at = localDateStr(new Date(Date.now() + parseInt(val('l-days'), 10) * 86400000));
   }
   const err = $('l-err');
   if (type === 'subscription' && !body.expires_at) { err.textContent = 'Set a duration or expiry date.'; err.classList.add('show'); return; }
@@ -884,7 +899,9 @@ function openCloudCustomerModal() {
   if (active.some((p) => p.id === 'verdix-pos')) $('cc-product').value = 'verdix-pos';
   $('cc-edition').value = 'web';
   $('cc-seats').value = '1';
+  $('cc-type').value = 'perpetual';
   $('cc-expires').value = '';
+  toggleCloudExpiry();
   $('cc-features').value = 'cloud-sync';
   $('cc-provision').checked = true;
   $('cc-err').classList.remove('show');
@@ -898,15 +915,24 @@ function openCloudCustomerModal() {
 async function submitCloudCustomer() {
   const err = $('cc-err');
   err.classList.remove('show');
+  const type = val('cc-type');
   const expires = val('cc-expires');
-  if (!expires) { err.textContent = 'Set an expiry date.'; err.classList.add('show'); return; }
+  if (type === 'subscription' && !expires) {
+    err.textContent = 'Set an expiry date, or choose Perpetual.';
+    err.classList.add('show');
+    return;
+  }
 
   const body = {
     customer_id: val('cc-customer'),
     product_id: val('cc-product') || undefined,
     edition: val('cc-edition'),
-    type: 'subscription',
-    expires_at: new Date(expires + 'T23:59:59').toISOString(),
+    type,
+    // Send the BARE 'YYYY-MM-DD' the admin picked. Serializing it to an ISO
+    // instant here would lose which calendar day was meant: from a negative
+    // UTC offset the same click lands on the next UTC day. The server pins the
+    // day to 23:59:59 (see normalizeExpiry). Perpetual sends no date at all.
+    ...(type === 'subscription' ? { expires_at: expires } : {}),
     max_activations: parseInt(val('cc-seats') || '1', 10),
     features: val('cc-features').split(',').map((f) => f.trim()).filter(Boolean),
     provision_database: $('cc-provision').checked,
