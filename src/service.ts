@@ -17,6 +17,7 @@ import { getPrivateKeyPem } from './keys';
 import { getProduct, listProducts, DEFAULT_PRODUCT_ID } from './products';
 import { sendWebhook } from './webhooks';
 import { query, withTransaction } from './db';
+import { lookupWithCacheFallback } from './lookup-fallback';
 import {
   getCachedLicense,
   getCachedLicenseByKey,
@@ -298,14 +299,18 @@ function safeJson(s: string): string[] {
   }
 }
 
+/** null = the DB confirmed no such licence; a DB outage + cache miss throws. */
 export async function getLicense(id: string): Promise<License | null> {
-  try {
-    const rows = await query<any[]>(`SELECT * FROM licenses WHERE id = ?`, [id]);
-    return rows[0] ? normalizeLicenseRow(rows[0]) : null;
-  } catch {
-    const cached = getCachedLicense(id);
-    return cached ? normalizeLicenseRow(cached) : null;
-  }
+  return lookupWithCacheFallback(
+    async () => {
+      const rows = await query<any[]>(`SELECT * FROM licenses WHERE id = ?`, [id]);
+      return rows[0] ? normalizeLicenseRow(rows[0]) : null;
+    },
+    () => {
+      const cached = getCachedLicense(id);
+      return cached ? normalizeLicenseRow(cached) : null;
+    }
+  );
 }
 
 export async function getLicenseByProductKey(productKey: string): Promise<License | null> {
@@ -486,16 +491,23 @@ export async function listActivations(licenseId?: string): Promise<any[]> {
   );
 }
 
+/**
+ * null means the database confirmed there is no such activation. A DB outage
+ * with a cache miss throws instead — see lookup-fallback.ts for why: the
+ * heartbeat turns null into 'released', and the POS deletes its licence on it.
+ */
 export async function getActivation(licenseId: string, machineId: string): Promise<any | null> {
-  try {
-    const rows = await query<any[]>(
-      `SELECT * FROM activations WHERE license_id = ? AND machine_id = ?`,
-      [licenseId, normalizeMachineId(machineId)]
-    );
-    return rows[0] || null;
-  } catch {
-    return getCachedActivation(licenseId, normalizeMachineId(machineId));
-  }
+  const mid = normalizeMachineId(machineId);
+  return lookupWithCacheFallback(
+    async () => {
+      const rows = await query<any[]>(
+        `SELECT * FROM activations WHERE license_id = ? AND machine_id = ?`,
+        [licenseId, mid]
+      );
+      return rows[0] || null;
+    },
+    () => getCachedActivation(licenseId, mid)
+  );
 }
 
 export async function touchActivation(
